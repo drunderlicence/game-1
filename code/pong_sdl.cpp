@@ -48,11 +48,13 @@ int main(int argc, char **argv)
         if (renderer)
         {
             globalIsRunning = true;
+
             SDL_Texture *const texture = SDL_CreateTexture(renderer,
                                                             SDL_PIXELFORMAT_ARGB8888,
                                                             SDL_TEXTUREACCESS_STREAMING,
                                                             GAME_WIDTH,
                                                             GAME_HEIGHT);
+
             OffscreenBuffer buffer =
             {
                 .bytesPerPixel = BYTES_PER_PIXEL,
@@ -61,6 +63,15 @@ int main(int argc, char **argv)
                 .pitch = GAME_WIDTH * BYTES_PER_PIXEL,
                 .memory = malloc(GAME_WIDTH * GAME_HEIGHT * BYTES_PER_PIXEL)
             };
+
+            uint64 permanentStorageSize = Megabytes(64);
+            GameMemory memory =
+            {
+                .isInitialized = false,
+                .permanentStorageSize = permanentStorageSize,
+                .permanentStorage = malloc(permanentStorageSize)
+            };
+
             while(globalIsRunning)
             {
                 SDL_Event event;
@@ -71,7 +82,7 @@ int main(int argc, char **argv)
                         globalIsRunning = false;
                     }
                 }
-                GameUpdateAndRender(&buffer);
+                GameUpdateAndRender(&memory, &buffer);
                 SDLUpdateWindow(&buffer, renderer, texture);
             }
 

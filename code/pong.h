@@ -26,6 +26,11 @@ typedef double real64;
 #define Assert(condition)
 #endif
 
+#define Kilobytes(x) ((x)*1024LL)
+#define Megabytes(x) (Kilobytes(x)*1024LL)
+#define Gigabytes(x) (Megabytes(x)*1024LL)
+#define Terabytes(x) (Gigabytes(x)*1024LL)
+
 #define GAME_WIDTH 640
 #define GAME_HEIGHT 480
 #define BYTES_PER_PIXEL 4
@@ -39,7 +44,26 @@ struct OffscreenBuffer
     void *const memory;
 };
 
-void GameUpdateAndRender(OffscreenBuffer *buffer);
+struct GameMemory
+{
+    bool32 isInitialized;
+
+    const uint64 permanentStorageSize;
+    void const *permanentStorage;
+
+    //const uint64 transientStorageSize;
+    //void *transientStorage;
+};
+
+struct GameState
+{
+    int blueOffset;
+    int greenOffset;
+    int redOffset;
+    int pingPongRed;
+};
+
+void GameUpdateAndRender(GameMemory *memory, OffscreenBuffer *buffer);
 
 #define PONG_H
 #endif

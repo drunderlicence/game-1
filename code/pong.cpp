@@ -21,18 +21,30 @@ internal void RenderWeirdGradient(const int blueOffset,
     }
 }
 
-void GameUpdateAndRender(OffscreenBuffer *buffer)
+void GameUpdateAndRender(GameMemory *memory, OffscreenBuffer *buffer)
 {
-    local_persist int xOffset = 0;
-    local_persist int yOffset = 0;
-    local_persist int zOffset = 0;
-    local_persist int pingPongZ = 1;
+    Assert(sizeof(GameState) <= memory->permanentStorageSize);
 
-    RenderWeirdGradient(xOffset++, yOffset++, zOffset, buffer);
+    GameState *gameState = (GameState *)memory->permanentStorage;
 
-    zOffset += pingPongZ;
-    if (zOffset == 0xFF || zOffset == 0)
+    if (!memory->isInitialized)
     {
-        pingPongZ *= -1;
+        gameState->blueOffset = 0;
+        gameState->greenOffset = 0;
+        gameState->redOffset = 0;
+        gameState->pingPongRed = 1;
+
+        memory->isInitialized = true;
+    }
+
+    RenderWeirdGradient(gameState->blueOffset++,
+                        gameState->greenOffset++,
+                        gameState->redOffset,
+                        buffer);
+
+    gameState->redOffset += gameState->pingPongRed;
+    if (gameState->redOffset == 0xFF || gameState->redOffset == 0)
+    {
+        gameState->pingPongRed *= -1;
     }
 }
