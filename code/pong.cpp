@@ -46,9 +46,6 @@ internal void RenderRect(const int left,
     }
 }
 
-//void GameUpdateAndRender(GameMemory *memory,
-                         //GameInput *input,
-                         //OffscreenBuffer *buffer)
 extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 {
     Assert(sizeof(GameState) <= memory->permanentStorageSize);

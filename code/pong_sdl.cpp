@@ -1,7 +1,10 @@
 #include "pong.h"
 
-#include <SDL2/SDL.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
 #include <dlfcn.h>
+#include <SDL2/SDL.h>
 
 global_variable bool32 globalIsRunning;
 
@@ -13,24 +16,53 @@ struct SDLGameCode
     game_update_and_render *UpdateAndRender;
 };
 
-internal SDLGameCode SDLLoadGameCode(const char *dllName)
+internal time_t SDLGetLastWriteTime(const char *filename)
 {
-    SDLGameCode result = {};
+    time_t lastWriteTime = 0;
 
-    result.gameCodeDLL = dlopen(dllName, RTLD_LAZY | RTLD_GLOBAL);
-    if (result.gameCodeDLL)
+    const int fd = open(filename, O_RDONLY);
+    if (fd != -1)
     {
-        result.UpdateAndRender = (game_update_and_render *)dlsym(result.gameCodeDLL,
+        struct stat fileStat;
+        if (fstat(fd, &fileStat) == 0)
+        {
+            lastWriteTime = fileStat.st_mtimespec.tv_sec;
+        }
+
+        close(fd);
+    }
+
+    return lastWriteTime;
+}
+
+internal void SDLLoadGameCode(const char *dllName, SDLGameCode *gameCode)
+{
+    gameCode->dllLastWriteTime = SDLGetLastWriteTime(dllName);
+
+    gameCode->gameCodeDLL = dlopen(dllName, RTLD_LAZY | RTLD_GLOBAL);
+    if (gameCode->gameCodeDLL)
+    {
+        gameCode->UpdateAndRender = (game_update_and_render *)dlsym(gameCode->gameCodeDLL,
                                                                  "GameUpdateAndRender");
-        result.isValid = result.UpdateAndRender != 0;
+        gameCode->isValid = gameCode->UpdateAndRender != 0;
     }
 
-    if (!result.isValid)
+    if (!gameCode->isValid)
     {
-        result.UpdateAndRender = 0;
+        gameCode->UpdateAndRender = 0;
+    }
+}
+
+internal void SDLUnloadGameCode(SDLGameCode *gameCode)
+{
+    if (gameCode->gameCodeDLL)
+    {
+        dlclose(gameCode->gameCodeDLL);
+        gameCode->gameCodeDLL = 0;
     }
 
-    return result;
+    gameCode->isValid = false;
+    gameCode->UpdateAndRender = 0;
 }
 
 internal void SDLUpdateWindow(const OffscreenBuffer *buffer,
@@ -88,12 +120,21 @@ int main(int argc, char **argv)
 
             if (buffer.memory && memory.permanentStorage)
             {
-                SDLGameCode gameCode = SDLLoadGameCode("./libpong.so");
+                SDLGameCode gameCode = {};
+                SDLLoadGameCode("./libpong.so", &gameCode);
+
                 GameInput input = {};
 
                 int frameCount = 0;
                 while(globalIsRunning)
                 {
+                    const time_t newDLLWriteTime = SDLGetLastWriteTime("./libpong.so");
+                    if (newDLLWriteTime != gameCode.dllLastWriteTime)
+                    {
+                        SDLUnloadGameCode(&gameCode);
+                        SDLLoadGameCode("./libpong.so", &gameCode);
+                    }
+
                     int eventsHandled = 0;
                     SDL_Event event;
                     while(SDL_PollEvent(&event))
