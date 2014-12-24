@@ -5,20 +5,6 @@
 
 global_variable bool32 globalIsRunning;
 
-internal bool32 SDLHandleEvent(SDL_Event *Event)
-{
-    bool32 shouldQuit = false;
-    switch(Event->type)
-    {
-        case SDL_QUIT:
-            {
-                printf("SDL_QUIT\n");
-                shouldQuit = true;
-            } break;
-    }
-    return shouldQuit;
-}
-
 internal void SDLUpdateWindow(const OffscreenBuffer *buffer,
                               SDL_Renderer *renderer,
                               SDL_Texture *texture)
@@ -64,7 +50,7 @@ int main(int argc, char **argv)
                 .memory = malloc(GAME_WIDTH * GAME_HEIGHT * BYTES_PER_PIXEL)
             };
 
-            uint64 permanentStorageSize = Megabytes(64);
+            const uint64 permanentStorageSize = Megabytes(64);
             GameMemory memory =
             {
                 .isInitialized = false,
@@ -72,18 +58,64 @@ int main(int argc, char **argv)
                 .permanentStorage = malloc(permanentStorageSize)
             };
 
-            while(globalIsRunning)
+            if (buffer.memory && memory.permanentStorage)
             {
-                SDL_Event event;
-                while(SDL_PollEvent(&event))
+                GameInput input = {};
+
+                int frameCount = 0;
+                while(globalIsRunning)
                 {
-                    if (SDLHandleEvent(&event))
+                    int eventsHandled = 0;
+                    SDL_Event event;
+                    while(SDL_PollEvent(&event))
                     {
-                        globalIsRunning = false;
+                        switch(event.type)
+                        {
+                            case SDL_KEYDOWN:
+                            case SDL_KEYUP:
+                                {
+                                    const SDL_Keycode keyCode = event.key.keysym.sym;
+                                    bool32 isDown = event.key.state == SDL_PRESSED;
+                                    if (keyCode == SDLK_ESCAPE)
+                                    {
+                                        printf("Escape, quit\n");
+                                        globalIsRunning = false;
+                                    }
+                                    else if (keyCode == SDLK_UP)
+                                    {
+                                        input.player[1].moveUp.isDown = isDown;
+                                    }
+                                    else if (keyCode == SDLK_DOWN)
+                                    {
+                                        input.player[1].moveDown.isDown = isDown;
+                                    }
+                                    else if (keyCode == SDLK_w)
+                                    {
+                                        input.player[0].moveUp.isDown = isDown;
+                                    }
+                                    else if (keyCode == SDLK_s)
+                                    {
+                                        input.player[0].moveDown.isDown = isDown;
+                                    }
+                                    else
+                                    {
+                                        input.anyButton.isDown = isDown;
+                                    }
+                                } break;
+                            case SDL_QUIT:
+                                {
+                                    printf("SDL_QUIT\n");
+                                    globalIsRunning = false;
+                                } break;
+                        }
+                        eventsHandled++;
                     }
+                    //printf("Frame %d - Events Handled %d\n", frameCount, eventsHandled);
+                    GameUpdateAndRender(&memory, &input, &buffer);
+                    SDLUpdateWindow(&buffer, renderer, texture);
+
+                    frameCount++;
                 }
-                GameUpdateAndRender(&memory, &buffer);
-                SDLUpdateWindow(&buffer, renderer, texture);
             }
 
         }

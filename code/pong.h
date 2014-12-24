@@ -55,15 +55,48 @@ struct GameMemory
     //void *transientStorage;
 };
 
+struct IntVector2
+{
+    union
+    {
+        int xy[2];
+        struct {
+            int x, y;
+        };
+    };
+};
+
+struct GameButtonState
+{
+    bool32 isDown;
+};
+
+struct GamePlayerInput
+{
+    GameButtonState moveUp;
+    GameButtonState moveDown;
+};
+
+struct GameInput
+{
+    GamePlayerInput player[2];
+    GameButtonState anyButton;
+    GameButtonState quitButton;
+};
+
 struct GameState
 {
     int blueOffset;
     int greenOffset;
     int redOffset;
     int pingPongRed;
+
+    IntVector2 playerPosition;
 };
 
-void GameUpdateAndRender(GameMemory *memory, OffscreenBuffer *buffer);
+void GameUpdateAndRender(GameMemory *memory,
+                         GameInput *input,
+                         OffscreenBuffer *buffer);
 
 #define PONG_H
 #endif

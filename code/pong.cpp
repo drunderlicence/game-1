@@ -21,7 +21,34 @@ internal void RenderWeirdGradient(const int blueOffset,
     }
 }
 
-void GameUpdateAndRender(GameMemory *memory, OffscreenBuffer *buffer)
+internal void RenderRect(const int left,
+                         const int top,
+                         const int right,
+                         const int bottom,
+                         const uint32 color,
+                         OffscreenBuffer *buffer)
+{
+    uint8 *endOfBuffer = (uint8 *)buffer->memory + buffer->pitch * buffer->height;
+
+    for (int x = left; x < right; ++x)
+    {
+        uint8 *pixel = (uint8 *)buffer->memory +
+            x * buffer->bytesPerPixel + top * buffer->pitch;
+        for (int y = top; y < bottom; ++y)
+        {
+            if (pixel >= buffer->memory && (pixel + 4) <= endOfBuffer)
+            {
+                *(uint32 *)pixel = color;
+            }
+
+            pixel += buffer->pitch;
+        }
+    }
+}
+
+void GameUpdateAndRender(GameMemory *memory,
+                         GameInput *input,
+                         OffscreenBuffer *buffer)
 {
     Assert(sizeof(GameState) <= memory->permanentStorageSize);
 
@@ -34,9 +61,35 @@ void GameUpdateAndRender(GameMemory *memory, OffscreenBuffer *buffer)
         gameState->redOffset = 0;
         gameState->pingPongRed = 1;
 
+        gameState->playerPosition.x = 10;
+        gameState->playerPosition.y = 10;
+
         memory->isInitialized = true;
     }
 
+    // UPDATE //
+    {
+        const int moveSpeed = 1;
+        if (input->player[1].moveUp.isDown)
+        {
+            gameState->playerPosition.y -= moveSpeed;
+        }
+        if (input->player[1].moveDown.isDown)
+        {
+            gameState->playerPosition.y += moveSpeed;
+        }
+
+        if (input->player[0].moveUp.isDown)
+        {
+            gameState->playerPosition.x -= moveSpeed;
+        }
+        if (input->player[0].moveDown.isDown)
+        {
+            gameState->playerPosition.x += moveSpeed;
+        }
+    }
+
+    // RENDER //
     RenderWeirdGradient(gameState->blueOffset++,
                         gameState->greenOffset++,
                         gameState->redOffset,
@@ -47,4 +100,18 @@ void GameUpdateAndRender(GameMemory *memory, OffscreenBuffer *buffer)
     {
         gameState->pingPongRed *= -1;
     }
+
+    const IntVector2 topLeft =
+    {
+        .x = gameState->playerPosition.x % buffer->width,
+        .y = gameState->playerPosition.y % buffer->height
+    };
+    const int size = 10;
+    const uint32 white = 0xFFFFFFFF;
+    RenderRect(topLeft.x,
+               topLeft.y,
+               topLeft.x + size,
+               topLeft.y + size,
+               white,
+               buffer);
 }
