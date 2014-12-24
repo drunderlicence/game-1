@@ -94,9 +94,12 @@ struct GameState
     IntVector2 playerPosition;
 };
 
-void GameUpdateAndRender(GameMemory *memory,
-                         GameInput *input,
-                         OffscreenBuffer *buffer);
+//void GameUpdateAndRender(GameMemory *memory,
+                         //GameInput *input,
+                         //OffscreenBuffer *buffer);
+
+#define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory, GameInput *input, OffscreenBuffer *buffer)
+typedef GAME_UPDATE_AND_RENDER(game_update_and_render);
 
 #define PONG_H
 #endif

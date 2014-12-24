@@ -1,9 +1,37 @@
 #include "pong.h"
-//#include "pong.cpp"
 
 #include <SDL2/SDL.h>
+#include <dlfcn.h>
 
 global_variable bool32 globalIsRunning;
+
+struct SDLGameCode
+{
+    bool32 isValid;
+    void *gameCodeDLL;
+    time_t dllLastWriteTime;
+    game_update_and_render *UpdateAndRender;
+};
+
+internal SDLGameCode SDLLoadGameCode(const char *dllName)
+{
+    SDLGameCode result = {};
+
+    result.gameCodeDLL = dlopen(dllName, RTLD_LAZY | RTLD_GLOBAL);
+    if (result.gameCodeDLL)
+    {
+        result.UpdateAndRender = (game_update_and_render *)dlsym(result.gameCodeDLL,
+                                                                 "GameUpdateAndRender");
+        result.isValid = result.UpdateAndRender != 0;
+    }
+
+    if (!result.isValid)
+    {
+        result.UpdateAndRender = 0;
+    }
+
+    return result;
+}
 
 internal void SDLUpdateWindow(const OffscreenBuffer *buffer,
                               SDL_Renderer *renderer,
@@ -60,6 +88,7 @@ int main(int argc, char **argv)
 
             if (buffer.memory && memory.permanentStorage)
             {
+                SDLGameCode gameCode = SDLLoadGameCode("./libpong.so");
                 GameInput input = {};
 
                 int frameCount = 0;
@@ -111,7 +140,10 @@ int main(int argc, char **argv)
                         eventsHandled++;
                     }
                     //printf("Frame %d - Events Handled %d\n", frameCount, eventsHandled);
-                    GameUpdateAndRender(&memory, &input, &buffer);
+                    if (gameCode.UpdateAndRender)
+                    {
+                        gameCode.UpdateAndRender(&memory, &input, &buffer);
+                    }
                     SDLUpdateWindow(&buffer, renderer, texture);
 
                     frameCount++;

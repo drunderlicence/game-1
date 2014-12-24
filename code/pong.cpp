@@ -46,9 +46,10 @@ internal void RenderRect(const int left,
     }
 }
 
-void GameUpdateAndRender(GameMemory *memory,
-                         GameInput *input,
-                         OffscreenBuffer *buffer)
+//void GameUpdateAndRender(GameMemory *memory,
+                         //GameInput *input,
+                         //OffscreenBuffer *buffer)
+extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 {
     Assert(sizeof(GameState) <= memory->permanentStorageSize);
 
@@ -107,7 +108,7 @@ void GameUpdateAndRender(GameMemory *memory,
         .y = gameState->playerPosition.y % buffer->height
     };
     const int size = 10;
-    const uint32 white = 0xFFFFFFFF;
+    const uint32 white = 0x00FFFFFF;
     RenderRect(topLeft.x,
                topLeft.y,
                topLeft.x + size,
