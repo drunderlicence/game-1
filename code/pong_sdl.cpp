@@ -43,7 +43,7 @@ internal void SDLLoadGameCode(const char *dllName, SDLGameCode *gameCode)
     if (gameCode->gameCodeDLL)
     {
         gameCode->UpdateAndRender = (game_update_and_render *)dlsym(gameCode->gameCodeDLL,
-                                                                 "GameUpdateAndRender");
+                                                                    "GameUpdateAndRender");
         gameCode->isValid = gameCode->UpdateAndRender != 0;
     }
 
@@ -65,6 +65,107 @@ internal void SDLUnloadGameCode(SDLGameCode *gameCode)
     gameCode->UpdateAndRender = 0;
 }
 
+struct SDLReplayBuffer
+{
+    int inputSnapshotIndex;
+    int inputSnapshotsCount;
+    int inputSnapshotsSize;
+    GameInput *inputSnapshots;
+    void *memorySnapshot;
+};
+
+struct SDLState
+{
+    SDLReplayBuffer replayBuffer;
+
+    GameMemory gameMemory;
+
+    int replayRecordingIndex;
+    int replayPlaybackIndex;
+};
+
+internal void SDLBeginRecordingInput(SDLState *state)
+{
+    state->replayRecordingIndex = 1;
+
+    SDLReplayBuffer *const buffer = &state->replayBuffer;
+    buffer->inputSnapshotIndex = 0;
+    buffer->inputSnapshotsCount = 0;
+    if (buffer->inputSnapshots)
+    {
+        free(buffer->inputSnapshots);
+        buffer->inputSnapshots = 0;
+    }
+    const int INITIAL_INPUT_BUFFER_SIZE = 60; // 1 seconds worth
+    buffer->inputSnapshotsSize = INITIAL_INPUT_BUFFER_SIZE;
+    buffer->inputSnapshots =
+        (GameInput *)malloc(sizeof(GameInput)*buffer->inputSnapshotsSize);
+
+    if (buffer->memorySnapshot)
+    {
+        free(buffer->memorySnapshot);
+    }
+    buffer->memorySnapshot = malloc(state->gameMemory.permanentStorageSize);
+    SDL_memcpy(buffer->memorySnapshot,
+               state->gameMemory.permanentStorage,
+               state->gameMemory.permanentStorageSize);
+}
+
+internal void SDLEndRecordingInput(SDLState *state)
+{
+    state->replayRecordingIndex = 0;
+}
+
+internal void SDLRecordInput(SDLState *state, GameInput *input)
+{
+    SDLReplayBuffer *const buffer = &state->replayBuffer;
+    buffer->inputSnapshots[buffer->inputSnapshotIndex++] = *input;
+
+    // resize buffer if needed
+    if (buffer->inputSnapshotIndex >= buffer->inputSnapshotsSize)
+    {
+        const int newBufferSize = buffer->inputSnapshotsSize * 2;
+        GameInput *const newBuffer =
+            (GameInput *)malloc(sizeof(GameInput)*newBufferSize);
+        for (int i = 0; i < buffer->inputSnapshotsSize; ++i)
+        {   // TODO memcopy this?
+            newBuffer[i] = buffer->inputSnapshots[i];
+        }
+        free(buffer->inputSnapshots);
+        buffer->inputSnapshotsSize = newBufferSize;
+        buffer->inputSnapshots = newBuffer;
+    }
+}
+
+internal void SDLBeginPlaybackInput(SDLState *state)
+{
+    state->replayPlaybackIndex = 1;
+
+    SDLReplayBuffer *const buffer = &state->replayBuffer;
+    buffer->inputSnapshotsCount = buffer->inputSnapshotIndex;
+    buffer->inputSnapshotIndex = 0;
+    SDL_memcpy(state->gameMemory.permanentStorage,
+               buffer->memorySnapshot,
+               state->gameMemory.permanentStorageSize);
+}
+
+internal void SDLEndPlaybackInput(SDLState *state)
+{
+    state->replayPlaybackIndex = 0;
+}
+
+internal void SDLPlaybackInput(SDLState *state, GameInput *input)
+{
+    SDLReplayBuffer *const buffer = &state->replayBuffer;
+    *input = buffer->inputSnapshots[buffer->inputSnapshotIndex++];
+    // hit end of buffer, restart playback
+    if (buffer->inputSnapshotIndex >= buffer->inputSnapshotsCount)
+    {
+        SDLEndPlaybackInput(state);
+        SDLBeginPlaybackInput(state);
+    }
+}
+
 internal void SDLUpdateWindow(const OffscreenBuffer *buffer,
                               SDL_Renderer *renderer,
                               SDL_Texture *texture)
@@ -80,11 +181,11 @@ int main(int argc, char **argv)
     SDL_Init(SDL_INIT_VIDEO);
 
     SDL_Window *const window = SDL_CreateWindow("Pong",
-                                                 SDL_WINDOWPOS_UNDEFINED,
-                                                 SDL_WINDOWPOS_UNDEFINED,
-                                                 GAME_WIDTH,
-                                                 GAME_HEIGHT,
-                                                 0);
+                                                SDL_WINDOWPOS_UNDEFINED,
+                                                SDL_WINDOWPOS_UNDEFINED,
+                                                GAME_WIDTH,
+                                                GAME_HEIGHT,
+                                                0);
     if (window)
     {
         SDL_Renderer *const renderer =
@@ -96,10 +197,10 @@ int main(int argc, char **argv)
             globalIsRunning = true;
 
             SDL_Texture *const texture = SDL_CreateTexture(renderer,
-                                                            SDL_PIXELFORMAT_ARGB8888,
-                                                            SDL_TEXTUREACCESS_STREAMING,
-                                                            GAME_WIDTH,
-                                                            GAME_HEIGHT);
+                                                           SDL_PIXELFORMAT_ARGB8888,
+                                                           SDL_TEXTUREACCESS_STREAMING,
+                                                           GAME_WIDTH,
+                                                           GAME_HEIGHT);
 
             OffscreenBuffer buffer =
             {
@@ -110,15 +211,20 @@ int main(int argc, char **argv)
                 .memory = malloc(GAME_WIDTH * GAME_HEIGHT * BYTES_PER_PIXEL)
             };
 
-            const uint64 permanentStorageSize = Megabytes(64);
-            GameMemory memory =
-            {
-                .isInitialized = false,
-                .permanentStorageSize = permanentStorageSize,
-                .permanentStorage = malloc(permanentStorageSize)
-            };
+            SDLState state = {};
 
-            if (buffer.memory && memory.permanentStorage)
+            const uint64 permanentStorageSize = Megabytes(64);
+            state.gameMemory.isInitialized = false;
+            state.gameMemory.permanentStorageSize = permanentStorageSize;
+            state.gameMemory.permanentStorage = malloc(permanentStorageSize);
+            //GameMemory memory =
+            //{
+                //.isInitialized = false,
+                //.permanentStorageSize = permanentStorageSize,
+                //.permanentStorage = malloc(permanentStorageSize)
+            //};
+
+            if (buffer.memory && state.gameMemory.permanentStorage)
             {
                 SDLGameCode gameCode = {};
                 SDLLoadGameCode("./libpong.so", &gameCode);
@@ -167,6 +273,33 @@ int main(int argc, char **argv)
                                     {
                                         input.player[0].moveDown.isDown = isDown;
                                     }
+                                    else if (keyCode == SDLK_l)
+                                    {
+                                        if (isDown && event.key.repeat == 0)
+                                        {
+                                            if (state.replayPlaybackIndex == 0)
+                                            {
+                                                // not recording
+                                                if (state.replayRecordingIndex == 0)
+                                                {
+                                                    printf("Start recording input\n");
+                                                    SDLBeginRecordingInput(&state);
+                                                }
+                                                else
+                                                {
+                                                    printf("Stop recording input\n");
+                                                    SDLEndRecordingInput(&state);
+                                                    printf("Start playing input\n");
+                                                    SDLBeginPlaybackInput(&state);
+                                                }
+                                            }
+                                            else
+                                            {
+                                                printf("Stop playing input\n");
+                                                SDLEndPlaybackInput(&state);
+                                            }
+                                        }
+                                    }
                                     else
                                     {
                                         input.anyButton.isDown = isDown;
@@ -181,9 +314,20 @@ int main(int argc, char **argv)
                         eventsHandled++;
                     }
                     //printf("Frame %d - Events Handled %d\n", frameCount, eventsHandled);
+
+                    if (state.replayRecordingIndex)
+                    {
+                        SDLRecordInput(&state, &input);
+                    }
+
+                    if (state.replayPlaybackIndex)
+                    {
+                        SDLPlaybackInput(&state, &input);
+                    }
+
                     if (gameCode.UpdateAndRender)
                     {
-                        gameCode.UpdateAndRender(&memory, &input, &buffer);
+                        gameCode.UpdateAndRender(&state.gameMemory, &input, &buffer);
                     }
                     SDLUpdateWindow(&buffer, renderer, texture);
 

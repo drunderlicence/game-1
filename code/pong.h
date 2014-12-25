@@ -48,8 +48,8 @@ struct GameMemory
 {
     bool32 isInitialized;
 
-    const uint64 permanentStorageSize;
-    void const *permanentStorage;
+    uint64 permanentStorageSize;
+    void *permanentStorage;
 
     //const uint64 transientStorageSize;
     //void *transientStorage;
