@@ -16,6 +16,26 @@ struct SDLGameCode
     game_update_and_render *UpdateAndRender;
 };
 
+struct SDLReplayBuffer
+{
+    int inputSnapshotIndex;
+    int inputSnapshotsCount;
+    int inputSnapshotsSize;
+    GameInput *inputSnapshots;
+    void *memorySnapshot;
+};
+
+struct SDLState
+{
+    SDLGameCode gameCode;
+
+    SDLReplayBuffer replayBuffer;
+    int replayRecordingIndex;
+    int replayPlaybackIndex;
+
+    GameMemory gameMemory;
+};
+
 internal time_t SDLGetLastWriteTime(const char *filename)
 {
     time_t lastWriteTime = 0;
@@ -65,25 +85,6 @@ internal void SDLUnloadGameCode(SDLGameCode *gameCode)
     gameCode->UpdateAndRender = 0;
 }
 
-struct SDLReplayBuffer
-{
-    int inputSnapshotIndex;
-    int inputSnapshotsCount;
-    int inputSnapshotsSize;
-    GameInput *inputSnapshots;
-    void *memorySnapshot;
-};
-
-struct SDLState
-{
-    SDLReplayBuffer replayBuffer;
-
-    GameMemory gameMemory;
-
-    int replayRecordingIndex;
-    int replayPlaybackIndex;
-};
-
 internal void SDLBeginRecordingInput(SDLState *state)
 {
     state->replayRecordingIndex = 1;
@@ -107,7 +108,7 @@ internal void SDLBeginRecordingInput(SDLState *state)
     }
     buffer->memorySnapshot = malloc(state->gameMemory.permanentStorageSize);
     SDL_memcpy(buffer->memorySnapshot,
-               state->gameMemory.permanentStorage,
+               (void *)state->gameMemory.permanentStorage,
                state->gameMemory.permanentStorageSize);
 }
 
@@ -144,7 +145,7 @@ internal void SDLBeginPlaybackInput(SDLState *state)
     SDLReplayBuffer *const buffer = &state->replayBuffer;
     buffer->inputSnapshotsCount = buffer->inputSnapshotIndex;
     buffer->inputSnapshotIndex = 0;
-    SDL_memcpy(state->gameMemory.permanentStorage,
+    SDL_memcpy((void *)state->gameMemory.permanentStorage,
                buffer->memorySnapshot,
                state->gameMemory.permanentStorageSize);
 }
@@ -177,6 +178,9 @@ internal void SDLUpdateWindow(const OffscreenBuffer *buffer,
 
 int main(int argc, char **argv)
 {
+    printf("int size: %lu\n", sizeof(int) * 8);
+    printf("int32 size: %lu\n", sizeof(int32) * 8);
+    printf("int64 size: %lu\n", sizeof(int64) * 8);
     // TODO _INIT_EVERYTHING is much slower than _INIT_VIDEO
     SDL_Init(SDL_INIT_VIDEO);
 
@@ -211,23 +215,24 @@ int main(int argc, char **argv)
                 .memory = malloc(GAME_WIDTH * GAME_HEIGHT * BYTES_PER_PIXEL)
             };
 
-            SDLState state = {};
-
             const uint64 permanentStorageSize = Megabytes(64);
-            state.gameMemory.isInitialized = false;
-            state.gameMemory.permanentStorageSize = permanentStorageSize;
-            state.gameMemory.permanentStorage = malloc(permanentStorageSize);
-            //GameMemory memory =
-            //{
-                //.isInitialized = false,
-                //.permanentStorageSize = permanentStorageSize,
-                //.permanentStorage = malloc(permanentStorageSize)
-            //};
+            SDLState state =
+            {
+                .gameCode = {},
+                .replayBuffer = {},
+                .replayRecordingIndex = 0,
+                .replayPlaybackIndex = 0,
+                .gameMemory =
+                {
+                    .isInitialized = false,
+                    .permanentStorageSize = permanentStorageSize,
+                    .permanentStorage = malloc(permanentStorageSize),
+                },
+            };
 
             if (buffer.memory && state.gameMemory.permanentStorage)
             {
-                SDLGameCode gameCode = {};
-                SDLLoadGameCode("./libpong.so", &gameCode);
+                SDLLoadGameCode("./libpong.so", &state.gameCode);
 
                 GameInput input = {};
 
@@ -235,10 +240,10 @@ int main(int argc, char **argv)
                 while(globalIsRunning)
                 {
                     const time_t newDLLWriteTime = SDLGetLastWriteTime("./libpong.so");
-                    if (newDLLWriteTime != gameCode.dllLastWriteTime)
+                    if (newDLLWriteTime != state.gameCode.dllLastWriteTime)
                     {
-                        SDLUnloadGameCode(&gameCode);
-                        SDLLoadGameCode("./libpong.so", &gameCode);
+                        SDLUnloadGameCode(&state.gameCode);
+                        SDLLoadGameCode("./libpong.so", &state.gameCode);
                     }
 
                     int eventsHandled = 0;
@@ -325,9 +330,9 @@ int main(int argc, char **argv)
                         SDLPlaybackInput(&state, &input);
                     }
 
-                    if (gameCode.UpdateAndRender)
+                    if (state.gameCode.UpdateAndRender)
                     {
-                        gameCode.UpdateAndRender(&state.gameMemory, &input, &buffer);
+                        state.gameCode.UpdateAndRender(&state.gameMemory, &input, &buffer);
                     }
                     SDLUpdateWindow(&buffer, renderer, texture);
 

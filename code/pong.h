@@ -48,8 +48,8 @@ struct GameMemory
 {
     bool32 isInitialized;
 
-    uint64 permanentStorageSize;
-    void *permanentStorage;
+    const uint64 permanentStorageSize;
+    void const *permanentStorage;
 
     //const uint64 transientStorageSize;
     //void *transientStorage;
@@ -62,6 +62,17 @@ struct IntVector2
         int xy[2];
         struct {
             int x, y;
+        };
+    };
+};
+
+struct Vector2
+{
+    union
+    {
+        float xy[2];
+        struct {
+            float x, y;
         };
     };
 };
@@ -91,7 +102,7 @@ struct GameState
     int redOffset;
     int pingPongRed;
 
-    IntVector2 playerPosition;
+    Vector2 playerPosition;
 };
 
 #define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory, GameInput *input, OffscreenBuffer *buffer)

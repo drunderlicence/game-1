@@ -21,28 +21,70 @@ internal void RenderWeirdGradient(const int blueOffset,
     }
 }
 
-internal void RenderRect(const int left,
-                         const int top,
-                         const int right,
-                         const int bottom,
-                         const uint32 color,
+internal int RoundFloatToInt(float real)
+{
+    // TODO find intrinsic?
+    return (int)(real + 0.5f);
+}
+
+internal uint32 RoundFloatToUInt32(float real)
+{
+    return (uint32)(real + 0.5f);
+}
+
+internal void RenderRect(const float left,
+                         const float top,
+                         const float right,
+                         const float bottom,
+                         const float red,
+                         const float green,
+                         const float blue,
                          OffscreenBuffer *buffer)
 {
-    uint8 *endOfBuffer = (uint8 *)buffer->memory + buffer->pitch * buffer->height;
+    int minX = RoundFloatToInt(left);
+    int minY = RoundFloatToInt(top);
+    int maxX = RoundFloatToInt(right);
+    int maxY = RoundFloatToInt(bottom);
 
-    for (int x = left; x < right; ++x)
+    // TODO MIN / MAX
+    if (minX < 0)
     {
-        uint8 *pixel = (uint8 *)buffer->memory +
-            x * buffer->bytesPerPixel + top * buffer->pitch;
-        for (int y = top; y < bottom; ++y)
-        {
-            if (pixel >= buffer->memory && (pixel + 4) <= endOfBuffer)
-            {
-                *(uint32 *)pixel = color;
-            }
+        minX = 0;
+    }
 
-            pixel += buffer->pitch;
+    if (minY < 0)
+    {
+        minY = 0;
+    }
+
+    if (maxX > buffer->width)
+    {
+        maxX = buffer->width;
+    }
+
+    if (maxY > buffer->height)
+    {
+        maxY = buffer->height;
+    }
+
+    uint32 color = ((RoundFloatToUInt32(red   * 255.0f) << 16) |
+                    (RoundFloatToUInt32(green * 255.0f) <<  8) |
+                    (RoundFloatToUInt32(blue  * 255.0f) <<  0));
+
+    uint8 *row =
+        (uint8 *)buffer->memory +
+        minX*buffer->bytesPerPixel +
+        minY*buffer->pitch;
+
+    for (int y = minY; y < maxY; ++y)
+    {
+        uint32 *pixel = (uint32 *)row;
+        for (int x = minX; x < maxX; ++x)
+        {
+            *pixel++ = color;
         }
+
+        row += buffer->pitch;
     }
 }
 
@@ -99,17 +141,17 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         gameState->pingPongRed *= -1;
     }
 
-    const IntVector2 topLeft =
+    const Vector2 topLeft =
     {
-        .x = gameState->playerPosition.x % buffer->width,
-        .y = gameState->playerPosition.y % buffer->height
+        .x = gameState->playerPosition.x,
+        .y = gameState->playerPosition.y,
     };
-    const int size = 10;
-    const uint32 white = 0x00FFFFFF;
+    const float size = 10.0f;
+
     RenderRect(topLeft.x,
                topLeft.y,
                topLeft.x + size,
                topLeft.y + size,
-               white,
+               1.0f, 1.0f, 1.0f,
                buffer);
 }
