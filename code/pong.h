@@ -116,7 +116,7 @@ struct GameState
 {
     BallState ball;
 
-    PaddleState paddle;
+    PaddleState paddle[2];
 };
 
 #define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory, GameInput *input, float dt, OffscreenBuffer *buffer)
