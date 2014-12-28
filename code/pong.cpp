@@ -1,14 +1,30 @@
 #include "pong.h"
 
-internal int RoundFloatToInt(float real)
+inline int RoundFloatToInt(float real)
 {
     // TODO find intrinsic?
     return (int)(real + 0.5f);
 }
 
-internal uint32 RoundFloatToUInt32(float real)
+inline uint32 RoundFloatToUInt32(float real)
 {
     return (uint32)(real + 0.5f);
+}
+
+inline float max(float a, float b)
+{
+    return a > b ? a : b;
+}
+
+inline float min(float a, float b)
+{
+    return a < b ? a : b;
+}
+
+inline float clamp(float in, float min, float max)
+{
+    //return max(min, min(max, in));
+    return in > min ? (in < max ? in : max) : min;
 }
 
 internal void RenderRect(const float left,
@@ -20,35 +36,14 @@ internal void RenderRect(const float left,
                          const float blue,
                          OffscreenBuffer *buffer)
 {
-    int minX = RoundFloatToInt(left);
-    int minY = RoundFloatToInt(top);
-    int maxX = RoundFloatToInt(right);
-    int maxY = RoundFloatToInt(bottom);
+    const int minX = clamp(RoundFloatToInt(left), 0, buffer->width);
+    const int minY = clamp(RoundFloatToInt(top), 0, buffer->height);
+    const int maxX = clamp(RoundFloatToInt(right), 0, buffer->width);
+    const int maxY = clamp(RoundFloatToInt(bottom), 0, buffer->height);
 
-    // TODO MIN / MAX
-    if (minX < 0)
-    {
-        minX = 0;
-    }
-
-    if (minY < 0)
-    {
-        minY = 0;
-    }
-
-    if (maxX > buffer->width)
-    {
-        maxX = buffer->width;
-    }
-
-    if (maxY > buffer->height)
-    {
-        maxY = buffer->height;
-    }
-
-    uint32 color = ((RoundFloatToUInt32(red   * 255.0f) << 16) |
-                    (RoundFloatToUInt32(green * 255.0f) <<  8) |
-                    (RoundFloatToUInt32(blue  * 255.0f) <<  0));
+    const uint32 color = ((RoundFloatToUInt32(red   * 255.0f) << 16) |
+                          (RoundFloatToUInt32(green * 255.0f) <<  8) |
+                          (RoundFloatToUInt32(blue  * 255.0f) <<  0));
 
     uint8 *row =
         (uint8 *)buffer->memory +
@@ -67,14 +62,125 @@ internal void RenderRect(const float left,
     }
 }
 
-internal void ResetBall(BallState *ball)
+internal void DrawLineHorz(const float left,
+                           const float right,
+                           const float y,
+                           const float red,
+                           const float green,
+                           const float blue,
+                           OffscreenBuffer *buffer)
+{
+    const int minX = clamp(RoundFloatToInt(left), 0, buffer->width);
+    const int maxX = clamp(RoundFloatToInt(right), 0, buffer->width);
+    const int Y = clamp(RoundFloatToInt(y), 0, buffer->height);
+
+    const uint32 color = ((RoundFloatToUInt32(red   * 255.0f) << 16) |
+                          (RoundFloatToUInt32(green * 255.0f) <<  8) |
+                          (RoundFloatToUInt32(blue  * 255.0f) <<  0));
+
+    uint8 *row =
+        (uint8 *)buffer->memory +
+        minX*buffer->bytesPerPixel +
+        Y*buffer->pitch;
+
+    uint32 *pixel = (uint32 *)row;
+    for (int x = minX; x < maxX; ++x)
+    {
+        *pixel++ = color;
+    }
+}
+
+internal void DrawLineVert(const float top,
+                           const float bottom,
+                           const float x,
+                           const float red,
+                           const float green,
+                           const float blue,
+                           OffscreenBuffer *buffer)
+{
+    const int minY = clamp(RoundFloatToInt(top), 0, buffer->height);
+    const int maxY = clamp(RoundFloatToInt(bottom), 0, buffer->height);
+    const int X = clamp(RoundFloatToInt(x), 0, buffer->width);
+
+    const uint32 color = ((RoundFloatToUInt32(red   * 255.0f) << 16) |
+                          (RoundFloatToUInt32(green * 255.0f) <<  8) |
+                          (RoundFloatToUInt32(blue  * 255.0f) <<  0));
+
+    uint8 *row =
+        (uint8 *)buffer->memory +
+        X*buffer->bytesPerPixel +
+        minY*buffer->pitch;
+
+    for (int y = minY; y < maxY; ++y)
+    {
+        uint32 *pixel = (uint32 *)row;
+        *pixel++ = color;
+
+        row += buffer->pitch;
+    }
+}
+
+internal void DrawBigNumber(const char *const bytes,
+                            const float x, const float y,
+                            int pixelDrawSize,
+                            const float r, const float g, const float b,
+                            OffscreenBuffer *buffer)
+{
+    const uint32 color = ((RoundFloatToUInt32(r * 255.0f) << 16) |
+                          (RoundFloatToUInt32(g * 255.0f) <<  8) |
+                          (RoundFloatToUInt32(b * 255.0f) <<  0));
+
+    const int minX = clamp(RoundFloatToInt(x), 0, buffer->width);
+    const int minY = clamp(RoundFloatToInt(y), 0, buffer->height);
+    const int maxX = clamp(minX + BIG_NUMBER_WIDTH * pixelDrawSize, 0, buffer->width);
+    const int maxY = clamp(minY + BIG_NUMBER_HEIGHT * pixelDrawSize, 0, buffer->height);
+
+    uint8 *row =
+        (uint8 *)buffer->memory +
+        minX*buffer->bytesPerPixel +
+        minY*buffer->pitch;
+
+    char *bitmapRow = (char *)bytes;
+    const int bitmapPitch = 5;
+
+    int pixelAdvanceX = 0;
+    int pixelAdvanceY = 0;
+    for (int y = minY; y < maxY; ++y)
+    {
+        uint32 *pixel = (uint32 *)row;
+        char *bitmapPixel = (char *)bitmapRow;
+        for (int x = minX; x < maxX; ++x)
+        {
+            if (*bitmapPixel)
+            {
+                *pixel = color;
+            }
+            pixel++;
+            if (++pixelAdvanceX >= pixelDrawSize)
+            {
+                bitmapPixel++;
+                pixelAdvanceX = 0;
+            }
+        }
+
+        row += buffer->pitch;
+        if(++pixelAdvanceY >= pixelDrawSize)
+        {
+            bitmapRow += bitmapPitch;
+            pixelAdvanceY = 0;
+        }
+    }
+
+}
+
+internal void ResetBall(BallState *ball, const float x)
 {
         ball->size       = 15.0f;
         ball->position.x = GAME_WIDTH * 0.5f;
         //ball->position.x = 100.0f;
-        ball->position.y = GAME_HEIGHT * 0.5f;// + 120.0f;
+        ball->position.y = GAME_HUD_HEIGHT + GAME_PLAY_HEIGHT * 0.5f;// + 120.0f;
         ball->speed      = 100.0f; // pixels per second
-        ball->velocity.x = -1.0f;
+        ball->velocity.x = x;
         ball->velocity.y = -1.0f;
 }
 
@@ -83,7 +189,7 @@ internal void ResetPaddle(PaddleState *paddle, float x)
     paddle->width = 10.0f;
     paddle->height = 60.0f;
     paddle->position.x = x;
-    paddle->position.y = GAME_HEIGHT * 0.5f;
+    paddle->position.y = GAME_HUD_HEIGHT + GAME_PLAY_HEIGHT * 0.5f;
 }
 
 internal void UpdatePaddle(PaddleState *const paddle,
@@ -101,11 +207,11 @@ internal void UpdatePaddle(PaddleState *const paddle,
     }
 
     const float halfPaddleHeight = paddle->height * 0.5f;
-    if (paddle->position.y < halfPaddleHeight)
+    if (paddle->position.y - halfPaddleHeight < GAME_HUD_HEIGHT)
     {
-        paddle->position.y = halfPaddleHeight;
+        paddle->position.y = GAME_HUD_HEIGHT + halfPaddleHeight;
     }
-    if (paddle->position.y > GAME_HEIGHT - halfPaddleHeight)
+    if (paddle->position.y + halfPaddleHeight > GAME_HEIGHT)
     {
         paddle->position.y = GAME_HEIGHT - halfPaddleHeight;
     }
@@ -191,10 +297,34 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
     if (!memory->isInitialized)
     {
-        ResetBall(&gameState->ball);
+        /*{
+            const int higher = 10;
+            const int lower = 5;
+            const int above = 12;
+            const int below = 3;
+            Assert(min(higher, lower) == lower);
+            Assert(max(higher, lower) == higher);
+            Assert(clamp(above, lower, higher) == higher);
+            Assert(clamp(below, lower, higher) == lower);
+        }
+        {
+            const int higher = -5;
+            const int lower = -10;
+            const int above = -3;
+            const int below = -12;
+            Assert(min(higher, lower) == lower);
+            Assert(max(higher, lower) == higher);
+            Assert(clamp(above, lower, higher) == higher);
+            Assert(clamp(below, lower, higher) == lower);
+        }*/
+
+        ResetBall(&gameState->ball, -1.0f);
 
         ResetPaddle(&gameState->paddle[0], 20.0f);
         ResetPaddle(&gameState->paddle[1], GAME_WIDTH - 20.0f);
+
+        gameState->scores[0] = 0;
+        gameState->scores[1] = 0;
 
         memory->isInitialized = true;
     }
@@ -214,11 +344,11 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
     // Collide ball
     const float halfBallSize = ball->size * 0.5f;
-    if (newPos.y - halfBallSize < 0.0f && ball->velocity.y < 0.0f)
+    if (newPos.y - halfBallSize < GAME_HUD_HEIGHT && ball->velocity.y < 0.0f)
     {
         ball->velocity.y = 1.0f;
         ball->speed *= 1.1f;
-        newPos.y = halfBallSize;
+        newPos.y = GAME_HUD_HEIGHT + halfBallSize;
     }
     else if (newPos.y + halfBallSize > GAME_HEIGHT && ball->velocity.y > 0.0f)
     {
@@ -227,15 +357,8 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         newPos.y = GAME_HEIGHT - halfBallSize;
     }
 
-    if (newPos.x + halfBallSize > GAME_WIDTH && ball->velocity.x > 0.0f)
-    {
-        ball->velocity.x *= -1.0f;
-        ball->speed *= 1.1f;
-        newPos.x = GAME_WIDTH - halfBallSize;
-    }
-
     // Collide with paddles
-    bool32 resetBall = false;
+     bool32 didReset = false;
     // Player 1
     {
         PaddleState *const paddle = &gameState->paddle[0];
@@ -257,15 +380,21 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
         const bool32 isOutOfBounds = newPos.x + halfBallSize < 0.0f;
 
-        resetBall |= CollideBallWithPaddle(ball,
-                                           paddle,
-                                           isBeyondPaddle,
-                                           wasBeyondPaddle,
-                                           isMovingTowardPaddle,
-                                           bounceVelocityX,
-                                           bouncePositionX,
-                                           isOutOfBounds,
-                                           &newPos);
+        const bool32 shouldReset = CollideBallWithPaddle(ball,
+                                                         paddle,
+                                                         isBeyondPaddle,
+                                                         wasBeyondPaddle,
+                                                         isMovingTowardPaddle,
+                                                         bounceVelocityX,
+                                                         bouncePositionX,
+                                                         isOutOfBounds,
+                                                         &newPos);
+        if (shouldReset)
+        {
+            didReset = true;
+            ResetBall(ball, -1.0f);
+            gameState->scores[1]++;
+        }
     }
     // Player 2
     {
@@ -288,24 +417,46 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
         const bool32 isOutOfBounds = newPos.x - halfBallSize > GAME_WIDTH;
 
-        resetBall |= CollideBallWithPaddle(ball,
-                                           paddle,
-                                           isBeyondPaddle,
-                                           wasBeyondPaddle,
-                                           isMovingTowardPaddle,
-                                           bounceVelocityX,
-                                           bouncePositionX,
-                                           isOutOfBounds,
-                                           &newPos);
+        const bool32 shouldReset  = CollideBallWithPaddle(ball,
+                                                          paddle,
+                                                          isBeyondPaddle,
+                                                          wasBeyondPaddle,
+                                                          isMovingTowardPaddle,
+                                                          bounceVelocityX,
+                                                          bouncePositionX,
+                                                          isOutOfBounds,
+                                                          &newPos);
+        if (shouldReset)
+        {
+            didReset = true;
+            ResetBall(ball, 1.0f);
+            gameState->scores[0]++;
+        }
     }
 
-    if (resetBall)
-    {
-        ResetBall(ball);
-    }
-    else
+    if (!didReset)
     {
         ball->position = newPos;
+    }
+
+    // Draw HUD
+    {
+        DrawBigNumber(BN[gameState->scores[0] % 10],
+                      10, 10, 10,
+                      1.0f, 1.0f, 1.0f,
+                      buffer);
+        DrawBigNumber(BN[gameState->scores[1] % 10],
+                      GAME_WIDTH - 10 - 10 * BIG_NUMBER_WIDTH, 10, 10,
+                      1.0f, 1.0f, 1.0f,
+                      buffer);
+        DrawLineHorz(0.0f, GAME_WIDTH, GAME_HUD_HEIGHT,
+                     1.0f, 1.0f, 1.0f,
+                     buffer);
+        const float gray = 0.25f;
+        const float offset = 15.0f;
+        DrawLineVert(GAME_HUD_HEIGHT + offset, GAME_HEIGHT - offset, GAME_WIDTH * 0.5,
+                     gray, gray, gray,
+                     buffer);
     }
 
     // Draw ball

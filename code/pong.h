@@ -36,6 +36,10 @@ typedef double real64;
 #define GAME_WIDTH 640
 #define GAME_HEIGHT 480
 #define BYTES_PER_PIXEL 4
+#define GAME_HUD_HEIGHT 80
+#define GAME_PLAY_HEIGHT (GAME_HEIGHT - GAME_HUD_HEIGHT)
+
+#include "big_numbers.h"
 
 struct OffscreenBuffer
 {
@@ -117,6 +121,8 @@ struct GameState
     BallState ball;
 
     PaddleState paddle[2];
+
+    int scores[2];
 };
 
 #define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory, GameInput *input, float dt, OffscreenBuffer *buffer)
