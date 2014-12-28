@@ -185,8 +185,9 @@ int main(int argc, char **argv)
     SDL_Init(SDL_INIT_VIDEO);
 
     SDL_Window *const window = SDL_CreateWindow("Pong",
-                                                SDL_WINDOWPOS_UNDEFINED,
-                                                SDL_WINDOWPOS_UNDEFINED,
+                                                100, 100,
+                                                //SDL_WINDOWPOS_UNDEFINED,
+                                                //SDL_WINDOWPOS_UNDEFINED,
                                                 GAME_WIDTH,
                                                 GAME_HEIGHT,
                                                 0);
@@ -332,7 +333,8 @@ int main(int argc, char **argv)
 
                     if (state.gameCode.UpdateAndRender)
                     {
-                        state.gameCode.UpdateAndRender(&state.gameMemory, &input, &buffer);
+                        // TODO proper frame timings
+                        state.gameCode.UpdateAndRender(&state.gameMemory, &input, 1.0f / 60.0f, &buffer);
                     }
                     SDLUpdateWindow(&buffer, renderer, texture);
 

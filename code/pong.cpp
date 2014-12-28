@@ -1,26 +1,5 @@
 #include "pong.h"
 
-internal void RenderWeirdGradient(const int blueOffset,
-                                  const int greenOffset,
-                                  const int redOffset,
-                                  OffscreenBuffer *buffer)
-{
-    uint8 *row = (uint8 *)buffer->memory;
-    for (int y = 0; y < buffer->height; ++y)
-    {
-        uint32 *pixel = (uint32 *)row;
-        for (int x = 0; x < buffer->width; ++x)
-        {
-            const uint8 red = (redOffset);
-            const uint8 green = (y + greenOffset);
-            const uint8 blue = (x + blueOffset);
-
-            *pixel++ = ((red << 16) | (green << 8) | blue);
-        }
-        row += buffer->pitch;
-    }
-}
-
 internal int RoundFloatToInt(float real)
 {
     // TODO find intrinsic?
@@ -88,6 +67,25 @@ internal void RenderRect(const float left,
     }
 }
 
+internal void ResetBall(BallState *ball)
+{
+        ball->size       = 15.0f;
+        ball->position.x = GAME_WIDTH * 0.5f;
+        //ball->position.x = 100.0f;
+        ball->position.y = GAME_HEIGHT * 0.5f;// + 120.0f;
+        ball->speed      = 100.0f; // pixels per second
+        ball->velocity.x = -1.0f;
+        ball->velocity.y = -1.0f;
+}
+
+internal void ResetPaddle(PaddleState *paddle)
+{
+    paddle->width = 10.0f;
+    paddle->height = 60.0f;
+    paddle->position.x = 20.0f;
+    paddle->position.y = GAME_HEIGHT * 0.5f;
+}
+
 extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 {
     Assert(sizeof(GameState) <= memory->permanentStorageSize);
@@ -96,62 +94,146 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
     if (!memory->isInitialized)
     {
-        gameState->blueOffset = 0;
-        gameState->greenOffset = 0;
-        gameState->redOffset = 0;
-        gameState->pingPongRed = 1;
+        ResetBall(&gameState->ball);
 
-        gameState->playerPosition.x = 10;
-        gameState->playerPosition.y = 10;
+        ResetPaddle(&gameState->paddle);
 
         memory->isInitialized = true;
     }
 
-    // UPDATE //
+    // Paddle input
+    PaddleState *const paddle = &gameState->paddle;
+    const float paddleMoveSpeed = 300.0f;
+    if (input->player[0].moveUp.isDown)
     {
-        const int moveSpeed = 1;
-        if (input->player[1].moveUp.isDown)
-        {
-            gameState->playerPosition.y -= moveSpeed;
-        }
-        if (input->player[1].moveDown.isDown)
-        {
-            gameState->playerPosition.y += moveSpeed;
-        }
+        paddle->position.y -= paddleMoveSpeed * dt;
+    }
+    if (input->player[0].moveDown.isDown)
+    {
+        paddle->position.y += paddleMoveSpeed * dt;
+    }
 
-        if (input->player[0].moveUp.isDown)
+    const float halfPaddleWidth = paddle->width * 0.5f;
+    const float halfPaddleHeight = paddle->height * 0.5f;
+    if (paddle->position.y < halfPaddleHeight)
+    {
+        paddle->position.y = halfPaddleHeight;
+    }
+    if (paddle->position.y > GAME_HEIGHT - halfPaddleHeight)
+    {
+        paddle->position.y = GAME_HEIGHT - halfPaddleHeight;
+    }
+
+    // Clear screen
+    RenderRect(0, 0, GAME_WIDTH, GAME_HEIGHT, 0.0f, 0.0f, 0.0f, buffer);
+
+    // Update ball
+    BallState *ball = &gameState->ball;
+    Vector2 newPos;
+    newPos.x = ball->position.x + ball->velocity.x * ball->speed * dt;
+    newPos.y = ball->position.y + ball->velocity.y * ball->speed * dt;
+
+    // Collide ball
+    bool32 resetBall = false;
+    const float halfBallSize = ball->size * 0.5f;
+
+    const bool32 isBeyondPaddle =
+        newPos.x - halfBallSize <= paddle->position.x + halfPaddleWidth;
+
+    if (isBeyondPaddle)
+    {
+        const bool32 wasBeyondPaddle =
+            ball->position.x - halfBallSize < paddle->position.x + halfPaddleWidth;
+        const bool32 overlapPaddleTop =
+            newPos.y + halfBallSize > paddle->position.y - halfPaddleHeight;
+        const bool32 overlapPaddleBottom =
+            newPos.y - halfBallSize < paddle->position.y + halfPaddleHeight;
+
+        if (!wasBeyondPaddle)
         {
-            gameState->playerPosition.x -= moveSpeed;
+            const bool32 isMovingTowardPaddle =
+                ball->velocity.x < 0.0f;
+
+            if (overlapPaddleTop && overlapPaddleBottom && isMovingTowardPaddle)
+            {
+                ball->velocity.x = 1.0f;
+                newPos.x = halfBallSize + paddle->position.x + halfPaddleWidth;
+            }
         }
-        if (input->player[0].moveDown.isDown)
+        else
         {
-            gameState->playerPosition.x += moveSpeed;
+            if (newPos.x + halfBallSize < 0)
+            {
+                resetBall = true;
+            }
+            else if (overlapPaddleTop &&
+                     //ball->velocity.y > 0.0f &&
+                     newPos.y < paddle->position.y)
+            {
+                ball->velocity.y = -1.0f;
+                newPos.y = paddle->position.y - halfPaddleHeight - halfBallSize;
+            }
+            else if (overlapPaddleBottom &&
+                     //ball->velocity.y < 0.0f &&
+                     newPos.y > paddle->position.y)
+            {
+                ball->velocity.y = 1.0f;
+                // TODO Feels better with ball-stops-paddle,
+                // but should paddle-stops-ball?
+                paddle->position.y = newPos.y - halfBallSize - halfPaddleHeight;
+                //newPos.y = halfBallSize + paddle->position.y + halfPaddleHeight;
+            }
         }
     }
 
-    // RENDER //
-    RenderWeirdGradient(gameState->blueOffset++,
-                        gameState->greenOffset++,
-                        gameState->redOffset,
-                        buffer);
-
-    gameState->redOffset += gameState->pingPongRed;
-    if (gameState->redOffset == 0xFF || gameState->redOffset == 0)
+    if (newPos.y - halfBallSize < 0.0f && ball->velocity.y < 0.0f)
     {
-        gameState->pingPongRed *= -1;
+        ball->velocity.y = 1.0f;
+        ball->speed *= 1.1f;
+        newPos.y = halfBallSize;
+    }
+    else if (newPos.y + halfBallSize > GAME_HEIGHT && ball->velocity.y > 0.0f)
+    {
+        ball->velocity.y = -1.0f;
+        ball->speed *= 1.1f;
+        newPos.y = GAME_HEIGHT - halfBallSize;
     }
 
-    const Vector2 topLeft =
+    if (newPos.x + halfBallSize > GAME_WIDTH && ball->velocity.x > 0.0f)
     {
-        .x = gameState->playerPosition.x,
-        .y = gameState->playerPosition.y,
-    };
-    const float size = 10.0f;
+        ball->velocity.x *= -1.0f;
+        ball->speed *= 1.1f;
+        newPos.x = GAME_WIDTH - halfBallSize;
+    }
 
-    RenderRect(topLeft.x,
-               topLeft.y,
-               topLeft.x + size,
-               topLeft.y + size,
-               1.0f, 1.0f, 1.0f,
-               buffer);
+    if (resetBall)
+    {
+        ResetBall(ball);
+    }
+    else
+    {
+        ball->position = newPos;
+    }
+
+    // Draw ball
+    {
+        const Vector2 topLeft = ball->position;
+        RenderRect(topLeft.x - halfBallSize,
+                   topLeft.y - halfBallSize,
+                   topLeft.x + halfBallSize,
+                   topLeft.y + halfBallSize,
+                   1.0f, 1.0f, 1.0f,
+                   buffer);
+    }
+
+    // Draw paddle
+    {
+        const Vector2 topLeft = paddle->position;
+        RenderRect(topLeft.x - halfPaddleWidth,
+                   topLeft.y - halfPaddleHeight,
+                   topLeft.x + halfPaddleWidth,
+                   topLeft.y + halfPaddleHeight,
+                   1.0f, 1.0f, 1.0f,
+                   buffer);
+    }
 }

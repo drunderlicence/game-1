@@ -1,6 +1,8 @@
 #if !defined(PONG_H)
 
 #include <stdint.h>
+#include <stdio.h>
+// NOPE ^
 
 #define internal static
 #define local_persist static
@@ -95,17 +97,29 @@ struct GameInput
     GameButtonState quitButton;
 };
 
-struct GameState
+struct BallState
 {
-    int blueOffset;
-    int greenOffset;
-    int redOffset;
-    int pingPongRed;
-
-    Vector2 playerPosition;
+    float size;
+    Vector2 position;
+    float speed;
+    Vector2 velocity;
 };
 
-#define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory, GameInput *input, OffscreenBuffer *buffer)
+struct PaddleState
+{
+    float width;
+    float height;
+    Vector2 position;
+};
+
+struct GameState
+{
+    BallState ball;
+
+    PaddleState paddle;
+};
+
+#define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory, GameInput *input, float dt, OffscreenBuffer *buffer)
 typedef GAME_UPDATE_AND_RENDER(game_update_and_render);
 
 #define PONG_H
