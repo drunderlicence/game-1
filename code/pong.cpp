@@ -196,6 +196,12 @@ internal void UpdatePaddle(PaddleState *const paddle,
                            GamePlayerInput *const playerInput,
                            const float dt)
 {
+    if(playerInput->joystickAxis != 0.0f)
+    {
+        const float center = GAME_HUD_HEIGHT + GAME_PLAY_HEIGHT * 0.5f;
+        const float dY = (float)((GAME_HEIGHT - GAME_HUD_HEIGHT) - paddle->height) / 2.0f;
+        paddle->position.y = center + dY * playerInput->joystickAxis;
+    }
     const float paddleMoveSpeed = 300.0f;
     if (playerInput->moveUp.isDown)
     {
@@ -299,26 +305,6 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     {
         const int r = memory->randomNumber();
         printf("%d\n", r);
-        /*{
-            const int higher = 10;
-            const int lower = 5;
-            const int above = 12;
-            const int below = 3;
-            Assert(min(higher, lower) == lower);
-            Assert(max(higher, lower) == higher);
-            Assert(clamp(above, lower, higher) == higher);
-            Assert(clamp(below, lower, higher) == lower);
-        }
-        {
-            const int higher = -5;
-            const int lower = -10;
-            const int above = -3;
-            const int below = -12;
-            Assert(min(higher, lower) == lower);
-            Assert(max(higher, lower) == higher);
-            Assert(clamp(above, lower, higher) == higher);
-            Assert(clamp(below, lower, higher) == lower);
-        }*/
 
         ResetBall(&gameState->ball,
                   memory->randomNumber() % 2 == 0 ? -1.0f : 1.0f,

@@ -99,6 +99,8 @@ struct GamePlayerInput
 {
     GameButtonState moveUp;
     GameButtonState moveDown;
+
+    float joystickAxis;
 };
 
 struct GameInput

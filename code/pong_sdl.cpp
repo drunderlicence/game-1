@@ -192,11 +192,11 @@ int main(int argc, char **argv)
     // TODO _INIT_EVERYTHING is much slower than _INIT_VIDEO
     SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK);
 
-    SDL_Joystick *controller1;
+    SDL_Joystick *controller;
 
     if (SDL_NumJoysticks() > 0)
     {
-        controller1 = SDL_JoystickOpen(0);
+        controller = SDL_JoystickOpen(0);
     }
 
     SDL_Window *const window = SDL_CreateWindow("Pong",
@@ -264,7 +264,6 @@ int main(int argc, char **argv)
                         SDLLoadGameCode("./libpong.so", &state.gameCode);
                     }
 
-                    int eventsHandled = 0;
                     SDL_Event event;
                     while(SDL_PollEvent(&event))
                     {
@@ -330,25 +329,7 @@ int main(int argc, char **argv)
                                 } break;
                             case SDL_JOYAXISMOTION:
                                 {
-                                    //if (event.jaxis.value > JOYSTICK_DEAD_ZONE ||
-                                        //event.jaxis.value < -JOYSTICK_DEAD_ZONE)
-                                    //{
-                                        //printf("AXIS: %d: %hd\n", event.jaxis.axis, event.jaxis.value);
-                                    //}
-                                    //if (event.jaxis.which == 0)
-                                    //{
-                                        //if (event.jaxis.axis == 1)
-                                        //{
-                                            //if (event.jaxis.value < -JOYSTICK_DEAD_ZONE)
-                                            //{
-                                                //printf("%hd\n", event.jaxis.value);
-                                            //}
-                                            //if (event.jaxis.value > JOYSTICK_DEAD_ZONE)
-                                            //{
-                                                //printf("%hd\n", event.jaxis.value);
-                                            //}
-                                        //}
-                                    //}
+                                    //
                                 } break;
                             case SDL_QUIT:
                                 {
@@ -356,45 +337,37 @@ int main(int argc, char **argv)
                                     globalIsRunning = false;
                                 } break;
                         }
-                        eventsHandled++;
                     }
-                    //printf("Frame %d - Events Handled %d\n", frameCount, eventsHandled);
 
-                    if (controller1)
+                    if (controller)
                     {
-                        //for (int i =)
-                        //{
-                        //const int leftTrigger = SDL_JoystickGetAxis(controller1, 2);
-                        //const int rightTrigger = SDL_JoystickGetAxis(controller1, 5);
-                        //printf("LEFT: %d | RIGHT: %d\n", leftTrigger, rightTrigger);
-                        //}
-                        //
-                        const int leftPaddle = SDL_JoystickGetAxis(controller1, 1);
-                        const int rightPaddle = SDL_JoystickGetAxis(controller1, 4);
-
                         {
-                            input.player[0].moveUp.isDown = false;
-                            input.player[0].moveDown.isDown = false;
-                            if (leftPaddle > JOYSTICK_DEAD_ZONE)
+                            const int stickVert = SDL_JoystickGetAxis(controller, 1);
+                            float axis = 0.0f;
+                            if (stickVert > 0)//JOYSTICK_DEAD_ZONE)
                             {
-                                input.player[0].moveDown.isDown = true;
+                                axis = (float)stickVert / 32767.0f;
                             }
-                            else if (leftPaddle < -JOYSTICK_DEAD_ZONE)
+                            else if (stickVert < 0)//-JOYSTICK_DEAD_ZONE)
                             {
-                                input.player[0].moveUp.isDown = true;
+                                axis = (float)stickVert / 32768.0f;
                             }
+
+                            input.player[0].joystickAxis = axis;
                         }
                         {
-                            input.player[1].moveUp.isDown = false;
-                            input.player[1].moveDown.isDown = false;
-                            if (rightPaddle > JOYSTICK_DEAD_ZONE)
+                            const int stickVert = SDL_JoystickGetAxis(controller, 4);
+                            float axis = 0.0f;
+                            if (stickVert > 0)//JOYSTICK_DEAD_ZONE)
                             {
-                                input.player[1].moveDown.isDown = true;
+                                axis = (float)stickVert / 32767.0f;
                             }
-                            else if (rightPaddle < -JOYSTICK_DEAD_ZONE)
+                            else if (stickVert < 0)//-JOYSTICK_DEAD_ZONE)
                             {
-                                input.player[1].moveUp.isDown = true;
+                                axis = (float)stickVert / 32768.0f;
                             }
+
+                            input.player[1].joystickAxis = axis;
                         }
                     }
 
@@ -430,9 +403,9 @@ int main(int argc, char **argv)
         // TODO logging
     }
 
-    if (controller1)
+    if (controller)
     {
-        SDL_JoystickClose(controller1);
+        SDL_JoystickClose(controller);
     }
 
     SDL_Quit();
