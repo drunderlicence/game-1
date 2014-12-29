@@ -50,6 +50,9 @@ struct OffscreenBuffer
     void *const memory;
 };
 
+#define RANDOM_NUMBER(name) int name()
+typedef RANDOM_NUMBER(random_number);
+
 struct GameMemory
 {
     bool32 isInitialized;
@@ -59,6 +62,8 @@ struct GameMemory
 
     //const uint64 transientStorageSize;
     //void *transientStorage;
+
+    random_number *const randomNumber;
 };
 
 struct IntVector2
@@ -127,6 +132,7 @@ struct GameState
 
 #define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory, GameInput *input, float dt, OffscreenBuffer *buffer)
 typedef GAME_UPDATE_AND_RENDER(game_update_and_render);
+
 
 #define PONG_H
 #endif

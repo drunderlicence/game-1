@@ -5,8 +5,10 @@
 #include <sys/stat.h>
 #include <dlfcn.h>
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_Test.h>
 
 global_variable bool32 globalIsRunning;
+global_variable SDLTest_RandomContext *globalRandomContext;
 
 struct SDLGameCode
 {
@@ -176,11 +178,20 @@ internal void SDLUpdateWindow(const OffscreenBuffer *buffer,
     SDL_RenderPresent(renderer);
 }
 
+RANDOM_NUMBER(randomNumber)
+{
+    return SDLTest_RandomInt(globalRandomContext);
+}
+
 int main(int argc, char **argv)
 {
-    printf("int size: %lu\n", sizeof(int) * 8);
-    printf("int32 size: %lu\n", sizeof(int32) * 8);
-    printf("int64 size: %lu\n", sizeof(int64) * 8);
+    SDLTest_RandomContext rc;
+    globalRandomContext = &rc;
+    SDLTest_RandomInitTime(globalRandomContext);
+
+    //const int r = SDLTest_RandomInt(globalRandomContext);
+    //printf("%d\n", r);
+
     // TODO _INIT_EVERYTHING is much slower than _INIT_VIDEO
     SDL_Init(SDL_INIT_VIDEO);
 
@@ -190,6 +201,7 @@ int main(int argc, char **argv)
                                                 //SDL_WINDOWPOS_UNDEFINED,
                                                 GAME_WIDTH,
                                                 GAME_HEIGHT,
+                                                //SDL_WINDOW_FULLSCREEN);
                                                 0);
     if (window)
     {
@@ -228,6 +240,7 @@ int main(int argc, char **argv)
                     .isInitialized = false,
                     .permanentStorageSize = permanentStorageSize,
                     .permanentStorage = malloc(permanentStorageSize),
+                    .randomNumber = randomNumber,
                 },
             };
 

@@ -173,7 +173,7 @@ internal void DrawBigNumber(const char *const bytes,
 
 }
 
-internal void ResetBall(BallState *ball, const float x)
+internal void ResetBall(BallState *ball, const float x, const float y)
 {
         ball->size       = 15.0f;
         ball->position.x = GAME_WIDTH * 0.5f;
@@ -181,7 +181,7 @@ internal void ResetBall(BallState *ball, const float x)
         ball->position.y = GAME_HUD_HEIGHT + GAME_PLAY_HEIGHT * 0.5f;// + 120.0f;
         ball->speed      = 100.0f; // pixels per second
         ball->velocity.x = x;
-        ball->velocity.y = -1.0f;
+        ball->velocity.y = y;
 }
 
 internal void ResetPaddle(PaddleState *paddle, float x)
@@ -297,6 +297,8 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
     if (!memory->isInitialized)
     {
+        const int r = memory->randomNumber();
+        printf("%d\n", r);
         /*{
             const int higher = 10;
             const int lower = 5;
@@ -318,7 +320,9 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             Assert(clamp(below, lower, higher) == lower);
         }*/
 
-        ResetBall(&gameState->ball, -1.0f);
+        ResetBall(&gameState->ball,
+                  memory->randomNumber() % 2 == 0 ? -1.0f : 1.0f,
+                  memory->randomNumber() % 2 == 0 ? -1.0f : 1.0f);
 
         ResetPaddle(&gameState->paddle[0], 20.0f);
         ResetPaddle(&gameState->paddle[1], GAME_WIDTH - 20.0f);
@@ -392,7 +396,9 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         if (shouldReset)
         {
             didReset = true;
-            ResetBall(ball, -1.0f);
+            ResetBall(ball,
+                      -1.0f,
+                      memory->randomNumber() % 2 == 0 ? -1.0f : 1.0f);
             gameState->scores[1]++;
         }
     }
@@ -429,7 +435,9 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         if (shouldReset)
         {
             didReset = true;
-            ResetBall(ball, 1.0f);
+            ResetBall(ball,
+                      1.0f,
+                      memory->randomNumber() % 2 == 0 ? -1.0f : 1.0f);
             gameState->scores[0]++;
         }
     }
