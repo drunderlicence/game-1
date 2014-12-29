@@ -189,11 +189,15 @@ int main(int argc, char **argv)
     globalRandomContext = &rc;
     SDLTest_RandomInitTime(globalRandomContext);
 
-    //const int r = SDLTest_RandomInt(globalRandomContext);
-    //printf("%d\n", r);
-
     // TODO _INIT_EVERYTHING is much slower than _INIT_VIDEO
-    SDL_Init(SDL_INIT_VIDEO);
+    SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK);
+
+    SDL_Joystick *controller1;
+
+    if (SDL_NumJoysticks() > 0)
+    {
+        controller1 = SDL_JoystickOpen(0);
+    }
 
     SDL_Window *const window = SDL_CreateWindow("Pong",
                                                 100, 100,
@@ -324,6 +328,28 @@ int main(int argc, char **argv)
                                         input.anyButton.isDown = isDown;
                                     }
                                 } break;
+                            case SDL_JOYAXISMOTION:
+                                {
+                                    //if (event.jaxis.value > JOYSTICK_DEAD_ZONE ||
+                                        //event.jaxis.value < -JOYSTICK_DEAD_ZONE)
+                                    //{
+                                        //printf("AXIS: %d: %hd\n", event.jaxis.axis, event.jaxis.value);
+                                    //}
+                                    //if (event.jaxis.which == 0)
+                                    //{
+                                        //if (event.jaxis.axis == 1)
+                                        //{
+                                            //if (event.jaxis.value < -JOYSTICK_DEAD_ZONE)
+                                            //{
+                                                //printf("%hd\n", event.jaxis.value);
+                                            //}
+                                            //if (event.jaxis.value > JOYSTICK_DEAD_ZONE)
+                                            //{
+                                                //printf("%hd\n", event.jaxis.value);
+                                            //}
+                                        //}
+                                    //}
+                                } break;
                             case SDL_QUIT:
                                 {
                                     printf("SDL_QUIT\n");
@@ -333,6 +359,44 @@ int main(int argc, char **argv)
                         eventsHandled++;
                     }
                     //printf("Frame %d - Events Handled %d\n", frameCount, eventsHandled);
+
+                    if (controller1)
+                    {
+                        //for (int i =)
+                        //{
+                        //const int leftTrigger = SDL_JoystickGetAxis(controller1, 2);
+                        //const int rightTrigger = SDL_JoystickGetAxis(controller1, 5);
+                        //printf("LEFT: %d | RIGHT: %d\n", leftTrigger, rightTrigger);
+                        //}
+                        //
+                        const int leftPaddle = SDL_JoystickGetAxis(controller1, 1);
+                        const int rightPaddle = SDL_JoystickGetAxis(controller1, 4);
+
+                        {
+                            input.player[0].moveUp.isDown = false;
+                            input.player[0].moveDown.isDown = false;
+                            if (leftPaddle > JOYSTICK_DEAD_ZONE)
+                            {
+                                input.player[0].moveDown.isDown = true;
+                            }
+                            else if (leftPaddle < -JOYSTICK_DEAD_ZONE)
+                            {
+                                input.player[0].moveUp.isDown = true;
+                            }
+                        }
+                        {
+                            input.player[1].moveUp.isDown = false;
+                            input.player[1].moveDown.isDown = false;
+                            if (rightPaddle > JOYSTICK_DEAD_ZONE)
+                            {
+                                input.player[1].moveDown.isDown = true;
+                            }
+                            else if (rightPaddle < -JOYSTICK_DEAD_ZONE)
+                            {
+                                input.player[1].moveUp.isDown = true;
+                            }
+                        }
+                    }
 
                     if (state.replayRecordingIndex)
                     {
@@ -364,6 +428,11 @@ int main(int argc, char **argv)
     else
     {
         // TODO logging
+    }
+
+    if (controller1)
+    {
+        SDL_JoystickClose(controller1);
     }
 
     SDL_Quit();

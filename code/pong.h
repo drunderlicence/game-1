@@ -39,6 +39,8 @@ typedef double real64;
 #define GAME_HUD_HEIGHT 80
 #define GAME_PLAY_HEIGHT (GAME_HEIGHT - GAME_HUD_HEIGHT)
 
+#define JOYSTICK_DEAD_ZONE 8000
+
 #include "big_numbers.h"
 
 struct OffscreenBuffer
