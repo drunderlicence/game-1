@@ -42,6 +42,7 @@ typedef double real64;
 #define GAME_PLAY_HEIGHT (GAME_HEIGHT - GAME_HUD_HEIGHT)
 
 #include "big_numbers.h"
+#include "coroutines.h"
 
 struct OffscreenBuffer
 {
@@ -135,6 +136,8 @@ struct GameState
     PaddleState paddle[2];
 
     int scores[2];
+
+    CoroutineContext coroutines[100];
 };
 
 #define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory, GameInput *input, float dt, OffscreenBuffer *buffer)

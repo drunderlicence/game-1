@@ -298,6 +298,30 @@ internal void DrawPaddle(PaddleState *const paddle, OffscreenBuffer *buffer)
                buffer);
 }
 
+internal int counterFunction(CoroutineContext* context)
+{
+    crStackBegin;
+        int i;
+    crStackEnd(counterStack);
+
+    const int MAX = 5;
+    crBegin;
+    while (true)
+    {
+        for (stack->i = 0; stack->i < MAX; ++stack->i)
+        {
+            crReturn(stack->i);
+        }
+
+        for (stack->i = MAX; stack->i > 0; --stack->i)
+        {
+            crReturn(stack->i);
+        }
+    }
+    printf("Ending coroutine\n");
+    crFinish;
+}
+
 extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 {
     Assert(sizeof(GameState) <= memory->permanentStorageSize);
@@ -321,6 +345,68 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
         memory->isInitialized = true;
     }
+
+    // Clear screen
+    RenderRect(0, 0, GAME_WIDTH, GAME_HEIGHT, 0.0f, 0.5f, 1.0f, buffer);
+
+    {
+        CoroutineContext *counterCoro = &gameState->coroutines[0];
+        local_persist int i;
+        local_persist int frames = 0;
+        const int framesToShowNumber = 30;
+
+        if (frames++ > framesToShowNumber)
+        {
+            if (!counterCoro->jmp)
+            {
+                CoroutineContext c = {};
+                *counterCoro = c;
+                printf("Starting coroutine\n");
+                i = counterFunction(counterCoro);
+            }
+            else
+            {
+                frames = 0;
+                i = counterFunction(counterCoro);
+                printf("Counter is: %d\n", i);
+            }
+        }
+
+        DrawBigNumber(BN[i % 10],
+                      10, 10, 10,
+                      1.0f, 1.0f, 1.0f,
+                      buffer);
+    }
+    {
+        CoroutineContext *counterCoro = &gameState->coroutines[1];
+        local_persist int i;
+        local_persist int frames = 0;
+        const int framesToShowNumber = 15;
+
+        if (frames++ > framesToShowNumber)
+        {
+            if (!counterCoro->jmp)
+            {
+                CoroutineContext c = {};
+                *counterCoro = c;
+                printf("Starting coroutine\n");
+                i = counterFunction(counterCoro);
+            }
+            else
+            {
+                frames = 0;
+                i = counterFunction(counterCoro);
+                printf("Counter is: %d\n", i);
+            }
+        }
+
+        DrawBigNumber(BN[i % 10],
+                      GAME_WIDTH - 10 - 10 * BIG_NUMBER_WIDTH, 10, 10,
+                      1.0f, 1.0f, 1.0f,
+                      buffer);
+    }
+
+#if 0
 
     // Paddle input
     UpdatePaddle(&gameState->paddle[0], &input->player[0], dt);
@@ -470,4 +556,6 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     // Draw paddles
     DrawPaddle(&gameState->paddle[0], buffer);
     DrawPaddle(&gameState->paddle[1], buffer);
+
+#endif
 }
