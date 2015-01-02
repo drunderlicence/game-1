@@ -33,13 +33,13 @@ typedef double real64;
 #define Gigabytes(x) (Megabytes(x)*1024LL)
 #define Terabytes(x) (Gigabytes(x)*1024LL)
 
+#define ArrayCount(x) (sizeof(x)/sizeof(x[0]))
+
 #define GAME_WIDTH 640
 #define GAME_HEIGHT 480
 #define BYTES_PER_PIXEL 4
 #define GAME_HUD_HEIGHT 80
 #define GAME_PLAY_HEIGHT (GAME_HEIGHT - GAME_HUD_HEIGHT)
-
-#define JOYSTICK_DEAD_ZONE 8000
 
 #include "big_numbers.h"
 
@@ -97,14 +97,17 @@ struct GameButtonState
 
 struct GamePlayerInput
 {
+    bool32 isUsingKeyboard;
     GameButtonState moveUp;
     GameButtonState moveDown;
 
+    bool32 isUsingJoystick;
     float joystickAxis;
 };
 
 struct GameInput
 {
+    bool32 onePlayerMode;
     GamePlayerInput player[2];
     GameButtonState anyButton;
     GameButtonState quitButton;

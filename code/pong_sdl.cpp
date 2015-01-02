@@ -183,6 +183,28 @@ RANDOM_NUMBER(randomNumber)
     return SDLTest_RandomInt(globalRandomContext);
 }
 
+internal void HandleJoystickInput(GameInput *const input,
+                                  SDL_Joystick *controller,
+                                  const int i,
+                                  const int axis)
+{
+    if (input->player[i].isUsingJoystick && !input->player[i].isUsingKeyboard)
+    {
+        const int stickVert = SDL_JoystickGetAxis(controller, axis);
+        float axisValue = 0.0f;
+        if (stickVert > 0)
+        {
+            axisValue = (float)stickVert / 32767.0f;
+        }
+        else if (stickVert < 0)
+        {
+            axisValue = (float)stickVert / 32768.0f;
+        }
+
+        input->player[i].joystickAxis = axisValue;
+    }
+}
+
 int main(int argc, char **argv)
 {
     SDLTest_RandomContext rc;
@@ -192,12 +214,23 @@ int main(int argc, char **argv)
     // TODO _INIT_EVERYTHING is much slower than _INIT_VIDEO
     SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK);
 
-    SDL_Joystick *controller;
-
-    if (SDL_NumJoysticks() > 0)
+    // TODO handle >2 joysticks, and arbitrary mapping to player inputs
+    GameInput input = {};
+    SDL_Joystick *controllers[2];
     {
-        controller = SDL_JoystickOpen(0);
+        const int numJoysticks = SDL_NumJoysticks();
+        if (numJoysticks == 1)
+        {
+            controllers[0] = SDL_JoystickOpen(0);
+            input.onePlayerMode = true;
+        }
+        else if (numJoysticks > 1)
+        {
+            controllers[0] = SDL_JoystickOpen(0);
+            controllers[1] = SDL_JoystickOpen(1);
+        }
     }
+
 
     SDL_Window *const window = SDL_CreateWindow("Pong",
                                                 100, 100,
@@ -252,7 +285,6 @@ int main(int argc, char **argv)
             {
                 SDLLoadGameCode("./libpong.so", &state.gameCode);
 
-                GameInput input = {};
 
                 int frameCount = 0;
                 while(globalIsRunning)
@@ -282,18 +314,22 @@ int main(int argc, char **argv)
                                     else if (keyCode == SDLK_UP)
                                     {
                                         input.player[1].moveUp.isDown = isDown;
+                                        input.player[1].isUsingKeyboard = true;
                                     }
                                     else if (keyCode == SDLK_DOWN)
                                     {
                                         input.player[1].moveDown.isDown = isDown;
+                                        input.player[1].isUsingKeyboard = true;
                                     }
                                     else if (keyCode == SDLK_w)
                                     {
                                         input.player[0].moveUp.isDown = isDown;
+                                        input.player[0].isUsingKeyboard = true;
                                     }
                                     else if (keyCode == SDLK_s)
                                     {
                                         input.player[0].moveDown.isDown = isDown;
+                                        input.player[0].isUsingKeyboard = true;
                                     }
                                     else if (keyCode == SDLK_l)
                                     {
@@ -329,7 +365,28 @@ int main(int argc, char **argv)
                                 } break;
                             case SDL_JOYAXISMOTION:
                                 {
-                                    //
+                                    if (input.onePlayerMode)
+                                    {
+                                        // TODO handle joysticks connecting, disconnecting
+                                        //      handle switching into two player mode
+                                        if (controllers[0])
+                                        {
+                                            input.player[0].isUsingJoystick = true;
+                                            input.player[1].isUsingJoystick = true;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        // TODO handle joysticks connecting, disconnecting
+                                        //      handle switching into one player mode
+                                        for (int i = 0; i < ArrayCount(controllers); ++i)
+                                        {
+                                            if (controllers[i] && event.jaxis.which == i)
+                                            {
+                                                input.player[i].isUsingJoystick = true;
+                                            }
+                                        }
+                                    }
                                 } break;
                             case SDL_QUIT:
                                 {
@@ -339,35 +396,23 @@ int main(int argc, char **argv)
                         }
                     }
 
-                    if (controller)
+                    if (input.onePlayerMode)
                     {
+                        if (controllers[0])
                         {
-                            const int stickVert = SDL_JoystickGetAxis(controller, 1);
-                            float axis = 0.0f;
-                            if (stickVert > 0)//JOYSTICK_DEAD_ZONE)
-                            {
-                                axis = (float)stickVert / 32767.0f;
-                            }
-                            else if (stickVert < 0)//-JOYSTICK_DEAD_ZONE)
-                            {
-                                axis = (float)stickVert / 32768.0f;
-                            }
-
-                            input.player[0].joystickAxis = axis;
+                            HandleJoystickInput(&input, controllers[0], 0, 1);
+                            HandleJoystickInput(&input, controllers[0], 1, 4);
                         }
+                    }
+                    else
+                    {
+                        // TODO loop over player-to-joystick mapping instead of controllers array
+                        for (int i = 0; i < ArrayCount(controllers); ++i)
                         {
-                            const int stickVert = SDL_JoystickGetAxis(controller, 4);
-                            float axis = 0.0f;
-                            if (stickVert > 0)//JOYSTICK_DEAD_ZONE)
+                            if (controllers[i])
                             {
-                                axis = (float)stickVert / 32767.0f;
+                                HandleJoystickInput(&input, controllers[i], i, 1);
                             }
-                            else if (stickVert < 0)//-JOYSTICK_DEAD_ZONE)
-                            {
-                                axis = (float)stickVert / 32768.0f;
-                            }
-
-                            input.player[1].joystickAxis = axis;
                         }
                     }
 
@@ -388,6 +433,13 @@ int main(int argc, char **argv)
                     }
                     SDLUpdateWindow(&buffer, renderer, texture);
 
+                    // TODO proper defined number of players
+                    for (int i = 0; i < ArrayCount(input.player); ++i)
+                    {
+                        input.player[i].isUsingJoystick = false;
+                        input.player[i].isUsingKeyboard = false;
+                    }
+
                     frameCount++;
                 }
             }
@@ -403,9 +455,12 @@ int main(int argc, char **argv)
         // TODO logging
     }
 
-    if (controller)
+    for (int i = 0; i < ArrayCount(controllers); ++i)
     {
-        SDL_JoystickClose(controller);
+        if (controllers[i])
+        {
+            SDL_JoystickClose(controllers[i]);
+        }
     }
 
     SDL_Quit();

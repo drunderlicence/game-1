@@ -196,30 +196,33 @@ internal void UpdatePaddle(PaddleState *const paddle,
                            GamePlayerInput *const playerInput,
                            const float dt)
 {
-    if(playerInput->joystickAxis != 0.0f)
+    if(playerInput->isUsingJoystick)
     {
         const float center = GAME_HUD_HEIGHT + GAME_PLAY_HEIGHT * 0.5f;
         const float dY = (float)((GAME_HEIGHT - GAME_HUD_HEIGHT) - paddle->height) / 2.0f;
         paddle->position.y = center + dY * playerInput->joystickAxis;
     }
-    const float paddleMoveSpeed = 300.0f;
-    if (playerInput->moveUp.isDown)
+    else
     {
-        paddle->position.y -= paddleMoveSpeed * dt;
-    }
-    if (playerInput->moveDown.isDown)
-    {
-        paddle->position.y += paddleMoveSpeed * dt;
-    }
+        const float paddleMoveSpeed = 300.0f;
+        if (playerInput->moveUp.isDown)
+        {
+            paddle->position.y -= paddleMoveSpeed * dt;
+        }
+        if (playerInput->moveDown.isDown)
+        {
+            paddle->position.y += paddleMoveSpeed * dt;
+        }
 
-    const float halfPaddleHeight = paddle->height * 0.5f;
-    if (paddle->position.y - halfPaddleHeight < GAME_HUD_HEIGHT)
-    {
-        paddle->position.y = GAME_HUD_HEIGHT + halfPaddleHeight;
-    }
-    if (paddle->position.y + halfPaddleHeight > GAME_HEIGHT)
-    {
-        paddle->position.y = GAME_HEIGHT - halfPaddleHeight;
+        const float halfPaddleHeight = paddle->height * 0.5f;
+        if (paddle->position.y - halfPaddleHeight < GAME_HUD_HEIGHT)
+        {
+            paddle->position.y = GAME_HUD_HEIGHT + halfPaddleHeight;
+        }
+        if (paddle->position.y + halfPaddleHeight > GAME_HEIGHT)
+        {
+            paddle->position.y = GAME_HEIGHT - halfPaddleHeight;
+        }
     }
 }
 
