@@ -1,12 +1,15 @@
 #if !defined(COROUTINES_H)
 
-#define crBegin if (!context->jmp) { context->jmp = 0; } switch(context->jmp) { case 0:
-#define crReturn(x) do { context->jmp = __LINE__; return x; \
+#define CORO_BEGIN if (!context->jmp) { CoroutineContext c = {}; *context = c; } \
+                   switch(context->jmp) { case 0:
+#define YIELD(x) do { context->jmp = __LINE__; return x; \
                          case __LINE__:; } while (0)
-#define crFinish } context->jmp = 0;
+#define CORO_END } CoroutineContext c = {}; *context = c; // reset context
 
-#define crStackBegin typedef struct {
-#define crStackEnd(x) } x; Assert(sizeof(x) <= sizeof(context->__PADDING__)); x *stack = (x *)context->__PADDING__
+//#define COROUTINE(x) x(CoroutineContext *context)
+#define CORO_STACK(vars) struct STACK##__LINE__ { vars }; \
+                         Assert(sizeof(STACK##__LINE__) <= sizeof(context->__PADDING__)); \
+                         STACK##__LINE__ *stack = (STACK##__LINE__ *)context->__PADDING__
 
 struct CoroutineContext
 {

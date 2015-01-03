@@ -101,8 +101,7 @@ internal void SDLBeginRecordingInput(SDLState *state)
     }
     const int INITIAL_INPUT_BUFFER_SIZE = 60; // 1 seconds worth
     buffer->inputSnapshotsSize = INITIAL_INPUT_BUFFER_SIZE;
-    buffer->inputSnapshots =
-        (GameInput *)malloc(sizeof(GameInput)*buffer->inputSnapshotsSize);
+    buffer->inputSnapshots = (GameInput *)malloc(sizeof(GameInput)*buffer->inputSnapshotsSize);
 
     if (buffer->memorySnapshot)
     {
@@ -242,10 +241,9 @@ int main(int argc, char **argv)
                                                 0);
     if (window)
     {
-        SDL_Renderer *const renderer =
-            SDL_CreateRenderer(window,
-                               -1,
-                               SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+        SDL_Renderer *const renderer = SDL_CreateRenderer(window,
+                                                          -1,
+                                                          SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
         if (renderer)
         {
             globalIsRunning = true;
@@ -285,8 +283,6 @@ int main(int argc, char **argv)
             {
                 SDLLoadGameCode("./libpong.so", &state.gameCode);
 
-
-                int frameCount = 0;
                 while(globalIsRunning)
                 {
                     const time_t newDLLWriteTime = SDLGetLastWriteTime("./libpong.so");
@@ -434,13 +430,12 @@ int main(int argc, char **argv)
                     SDLUpdateWindow(&buffer, renderer, texture);
 
                     // TODO proper defined number of players
+                    // TODO check that this doesn't break input recording/playback
                     for (int i = 0; i < ArrayCount(input.player); ++i)
                     {
                         input.player[i].isUsingJoystick = false;
                         input.player[i].isUsingKeyboard = false;
                     }
-
-                    frameCount++;
                 }
             }
 

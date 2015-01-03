@@ -114,6 +114,12 @@ struct GameInput
     GameButtonState quitButton;
 };
 
+struct GameTime
+{
+    float seconds;
+    int frameCount;
+};
+
 struct BallState
 {
     float size;
@@ -131,11 +137,15 @@ struct PaddleState
 
 struct GameState
 {
-    BallState ball;
+    GameTime time;
 
+    BallState ball;
     PaddleState paddle[2];
 
     int scores[2];
+
+    CoroutineContext *fastCounter;
+    CoroutineContext *slowCounter;
 
     CoroutineContext coroutines[100];
 };

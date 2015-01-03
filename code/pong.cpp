@@ -45,10 +45,7 @@ internal void RenderRect(const float left,
                           (RoundFloatToUInt32(green * 255.0f) <<  8) |
                           (RoundFloatToUInt32(blue  * 255.0f) <<  0));
 
-    uint8 *row =
-        (uint8 *)buffer->memory +
-        minX*buffer->bytesPerPixel +
-        minY*buffer->pitch;
+    uint8 *row = (uint8 *)buffer->memory + minX*buffer->bytesPerPixel + minY*buffer->pitch;
 
     for (int y = minY; y < maxY; ++y)
     {
@@ -78,10 +75,7 @@ internal void DrawLineHorz(const float left,
                           (RoundFloatToUInt32(green * 255.0f) <<  8) |
                           (RoundFloatToUInt32(blue  * 255.0f) <<  0));
 
-    uint8 *row =
-        (uint8 *)buffer->memory +
-        minX*buffer->bytesPerPixel +
-        Y*buffer->pitch;
+    uint8 *row = (uint8 *)buffer->memory + minX*buffer->bytesPerPixel + Y*buffer->pitch;
 
     uint32 *pixel = (uint32 *)row;
     for (int x = minX; x < maxX; ++x)
@@ -106,10 +100,7 @@ internal void DrawLineVert(const float top,
                           (RoundFloatToUInt32(green * 255.0f) <<  8) |
                           (RoundFloatToUInt32(blue  * 255.0f) <<  0));
 
-    uint8 *row =
-        (uint8 *)buffer->memory +
-        X*buffer->bytesPerPixel +
-        minY*buffer->pitch;
+    uint8 *row = (uint8 *)buffer->memory + X*buffer->bytesPerPixel + minY*buffer->pitch;
 
     for (int y = minY; y < maxY; ++y)
     {
@@ -135,10 +126,7 @@ internal void DrawBigNumber(const char *const bytes,
     const int maxX = clamp(minX + BIG_NUMBER_WIDTH * pixelDrawSize, 0, buffer->width);
     const int maxY = clamp(minY + BIG_NUMBER_HEIGHT * pixelDrawSize, 0, buffer->height);
 
-    uint8 *row =
-        (uint8 *)buffer->memory +
-        minX*buffer->bytesPerPixel +
-        minY*buffer->pitch;
+    uint8 *row = (uint8 *)buffer->memory + minX*buffer->bytesPerPixel + minY*buffer->pitch;
 
     char *bitmapRow = (char *)bytes;
     const int bitmapPitch = 5;
@@ -243,10 +231,8 @@ internal bool CollideBallWithPaddle(BallState *const ball,
 
     if (isBeyondPaddle)
     {
-        const bool32 overlapPaddleTop =
-            newPos->y + halfBallSize > paddle->position.y - halfPaddleHeight;
-        const bool32 overlapPaddleBottom =
-            newPos->y - halfBallSize < paddle->position.y + halfPaddleHeight;
+        const bool32 overlapPaddleTop = newPos->y + halfBallSize > paddle->position.y - halfPaddleHeight;
+        const bool32 overlapPaddleBottom = newPos->y - halfBallSize < paddle->position.y + halfPaddleHeight;
 
         if (!wasBeyondPaddle)
         {
@@ -298,28 +284,48 @@ internal void DrawPaddle(PaddleState *const paddle, OffscreenBuffer *buffer)
                buffer);
 }
 
-internal int counterFunction(CoroutineContext* context)
+internal CoroutineContext *GetFreeCoroutine(GameState *state)
 {
-    crStackBegin;
-        int i;
-    crStackEnd(counterStack);
+    CoroutineContext *c = 0;
+    for (int i = 0; i < ArrayCount(state->coroutines); ++i)
+    {
+        if (!state->coroutines[i].jmp)
+        {
+            c = &state->coroutines[i];
+            break;
+        }
+    }
+    Assert(c); // Ran out of coroutines
+    return c;
+}
 
+internal int counterFunction(CoroutineContext *context, GameTime *time, int updateEveryNthFrame)
+{
+    CORO_STACK(int i;
+               );
     const int MAX = 5;
-    crBegin;
+
+    CORO_BEGIN;
     while (true)
     {
         for (stack->i = 0; stack->i < MAX; ++stack->i)
         {
-            crReturn(stack->i);
+            do
+            {
+                YIELD(stack->i);
+            } while (time->frameCount % updateEveryNthFrame != 0);
         }
 
         for (stack->i = MAX; stack->i > 0; --stack->i)
         {
-            crReturn(stack->i);
+            do
+            {
+                YIELD(stack->i);
+            } while (time->frameCount % updateEveryNthFrame != 0);
         }
     }
     printf("Ending coroutine\n");
-    crFinish;
+    CORO_END;
 }
 
 extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
@@ -350,57 +356,28 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     RenderRect(0, 0, GAME_WIDTH, GAME_HEIGHT, 0.0f, 0.5f, 1.0f, buffer);
 
     {
-        CoroutineContext *counterCoro = &gameState->coroutines[0];
-        local_persist int i;
-        local_persist int frames = 0;
-        const int framesToShowNumber = 30;
-
-        if (frames++ > framesToShowNumber)
+        int slowCount;
+        if (!gameState->slowCounter)
         {
-            if (!counterCoro->jmp)
-            {
-                CoroutineContext c = {};
-                *counterCoro = c;
-                printf("Starting coroutine\n");
-                i = counterFunction(counterCoro);
-            }
-            else
-            {
-                frames = 0;
-                i = counterFunction(counterCoro);
-                printf("Counter is: %d\n", i);
-            }
+            gameState->slowCounter = GetFreeCoroutine(gameState);
         }
-
-        DrawBigNumber(BN[i % 10],
+        slowCount = counterFunction(gameState->slowCounter, &gameState->time, 60);
+        //printf("slow: %d\n", slowCount);
+        DrawBigNumber(BN[slowCount % 10],
                       10, 10, 10,
                       1.0f, 1.0f, 1.0f,
                       buffer);
     }
+
     {
-        CoroutineContext *counterCoro = &gameState->coroutines[1];
-        local_persist int i;
-        local_persist int frames = 0;
-        const int framesToShowNumber = 15;
-
-        if (frames++ > framesToShowNumber)
+        int fastCount;
+        if (!gameState->fastCounter)
         {
-            if (!counterCoro->jmp)
-            {
-                CoroutineContext c = {};
-                *counterCoro = c;
-                printf("Starting coroutine\n");
-                i = counterFunction(counterCoro);
-            }
-            else
-            {
-                frames = 0;
-                i = counterFunction(counterCoro);
-                printf("Counter is: %d\n", i);
-            }
+            gameState->fastCounter = GetFreeCoroutine(gameState);
         }
-
-        DrawBigNumber(BN[i % 10],
+        fastCount = counterFunction(gameState->fastCounter, &gameState->time, 30);
+        //printf("fast: %d\n", fastCount);
+        DrawBigNumber(BN[fastCount % 10],
                       GAME_WIDTH - 10 - 10 * BIG_NUMBER_WIDTH, 10, 10,
                       1.0f, 1.0f, 1.0f,
                       buffer);
@@ -558,4 +535,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
     DrawPaddle(&gameState->paddle[1], buffer);
 
 #endif
+
+    gameState->time.seconds += dt;
+    ++gameState->time.frameCount;
 }
