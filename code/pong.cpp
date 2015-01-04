@@ -391,7 +391,7 @@ internal void SplashCoroutine(CoroutineContext *context,
     {
         nt = (time->seconds - stack->t0) / fadeInTime;
         blend = sinf(nt * 1.570796327f);
-        printf("T: %f, blend: %f\n", nt, blend);
+        //printf("T: %f, blend: %f\n", nt, blend);
         Blit(0, 0,
              blend,
              splashscreenBitmap,

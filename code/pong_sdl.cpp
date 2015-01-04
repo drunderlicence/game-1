@@ -340,12 +340,18 @@ int main(int argc, char **argv)
                                                            GAME_WIDTH,
                                                            GAME_HEIGHT);
 
-            SDL_Surface *image;
-            SDL_Texture *imageTexture;
-            image = SDL_LoadBMP("../data/test2.bmp");
-            if (image)
+            // FIXME without this fake bmp load and texture assign,
+            // subsequent loading of images fails when trying to access
+            // bitmap pixels
             {
-                imageTexture = SDL_CreateTextureFromSurface(renderer, image);
+                SDL_Surface *image;
+                SDL_Texture *imageTexture;
+                image = SDL_LoadBMP("../data/drul.bmp");
+                if (image)
+                {
+                    imageTexture = SDL_CreateTextureFromSurface(renderer, image);
+                    SDL_FreeSurface(image);
+                }
             }
 
             OffscreenBuffer buffer =
