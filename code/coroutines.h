@@ -1,6 +1,8 @@
 #if !defined(COROUTINES_H)
 
-#define CORO_BEGIN if (!context->jmp) { CoroutineContext c = {}; *context = c; } \
+#define CORO_INITIALIZED 357407
+
+#define CORO_BEGIN if (context->jmp == CORO_INITIALIZED) { CoroutineContext c = {}; *context = c; } \
                    switch(context->jmp) { case 0:
 #define YIELD(x) do { context->jmp = __LINE__; return x; \
                          case __LINE__:; } while (0)

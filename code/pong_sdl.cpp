@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <dlfcn.h>
+#include <libproc.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_Test.h>
 
@@ -16,6 +17,8 @@ struct SDLGameCode
     void *gameCodeDLL;
     time_t dllLastWriteTime;
     game_update_and_render *UpdateAndRender;
+    char exePath[1024]; // FIXME make sure this is big enough
+    char dllPath[1024];
 };
 
 struct SDLReplayBuffer
@@ -38,6 +41,68 @@ struct SDLState
     GameMemory gameMemory;
 };
 
+PLATFORM_RANDOM_NUMBER(SDLRandomNumber)
+{
+    return SDLTest_RandomInt(globalRandomContext);
+}
+
+PLATFORM_LOAD_BMP(SDLLoadBMP)
+{
+    SDL_Surface *image = SDL_LoadBMP(filename);
+    if (image)
+    {
+        OffscreenBuffer dest =
+        {
+            .bytesPerPixel = BYTES_PER_PIXEL,
+            .width = image->w,
+            .height = image->h,
+            .pitch = image->w * BYTES_PER_PIXEL,
+            .memory = bitmapMemory,
+        };
+
+        if (image->pixels)
+        {
+            uint8 *srcRow = (uint8 *)image->pixels;
+            uint8 *destRow = (uint8 *)dest.memory;
+
+            const int srcPixelStride = image->pitch / image->w;
+            /*Assert(srcPixelStride == 3);*/
+            Assert(srcPixelStride <= BYTES_PER_PIXEL);
+
+            for (int y = 0; y < image->h; ++y)
+            {
+                uint8 *srcPixel = (uint8 *)srcRow;
+                uint32 *destPixel = (uint32 *)destRow;
+                for (int x = 0; x < image->w; ++x)
+                {
+                    /*int red = *srcPixel++;
+                    int green = *srcPixel++;
+                    int blue = *srcPixel++;
+
+                    uint32 pixel = ((red << 16) | (green << 8) | (blue));
+                    *destPixel++ = pixel;*/
+                    *destPixel++ = *(uint32 *)srcPixel;
+                    srcPixel += srcPixelStride;
+                }
+
+                srcRow += image->pitch;
+                destRow += dest.pitch;
+            }
+        }
+
+        SDL_FreeSurface(image);
+
+        return dest;
+    }
+    else
+    {
+        // TODO logging
+    }
+
+    OffscreenBuffer empty = {};
+    return empty;
+}
+
 internal time_t SDLGetLastWriteTime(const char *filename)
 {
     time_t lastWriteTime = 0;
@@ -55,6 +120,32 @@ internal time_t SDLGetLastWriteTime(const char *filename)
     }
 
     return lastWriteTime;
+}
+internal void SDLGetGameCodePath(SDLGameCode *gameCode)
+{
+    proc_pidpath(getpid(), gameCode->exePath, sizeof(gameCode->exePath));
+
+    char *exeName = gameCode->exePath;
+    for (char *s = gameCode->exePath; *s; ++s)
+    {
+        if (*s == '/')
+        {
+            exeName = s + 1;
+        }
+    }
+
+    for (char *s = gameCode->exePath, *d = gameCode->dllPath; *s; ++s, ++d)
+    {
+        *d = *s;
+    }
+    char dllName[1024] = "libpong.so";
+    for (char *s = gameCode->dllPath + (exeName - gameCode->exePath), *t = dllName; *t; ++s, ++t)
+    {
+        *s = *t;
+    }
+
+    /*printf("exe path: %s\n", gameCode->exePath);
+    printf("dll path: %s\n", gameCode->dllPath);*/
 }
 
 internal void SDLLoadGameCode(const char *dllName, SDLGameCode *gameCode)
@@ -177,11 +268,6 @@ internal void SDLUpdateWindow(const OffscreenBuffer *buffer,
     SDL_RenderPresent(renderer);
 }
 
-RANDOM_NUMBER(randomNumber)
-{
-    return SDLTest_RandomInt(globalRandomContext);
-}
-
 internal void HandleJoystickInput(GameInput *const input,
                                   SDL_Joystick *controller,
                                   const int i,
@@ -254,6 +340,14 @@ int main(int argc, char **argv)
                                                            GAME_WIDTH,
                                                            GAME_HEIGHT);
 
+            SDL_Surface *image;
+            SDL_Texture *imageTexture;
+            image = SDL_LoadBMP("../data/test2.bmp");
+            if (image)
+            {
+                imageTexture = SDL_CreateTextureFromSurface(renderer, image);
+            }
+
             OffscreenBuffer buffer =
             {
                 .bytesPerPixel = BYTES_PER_PIXEL,
@@ -275,21 +369,24 @@ int main(int argc, char **argv)
                     .isInitialized = false,
                     .permanentStorageSize = permanentStorageSize,
                     .permanentStorage = malloc(permanentStorageSize),
-                    .randomNumber = randomNumber,
+                    .PlatformRandomNumber = SDLRandomNumber,
+                    .PlatformLoadBMP = SDLLoadBMP,
                 },
             };
 
             if (buffer.memory && state.gameMemory.permanentStorage)
             {
-                SDLLoadGameCode("./libpong.so", &state.gameCode);
+                SDLGetGameCodePath(&state.gameCode);
+
+                SDLLoadGameCode(state.gameCode.dllPath, &state.gameCode);
 
                 while(globalIsRunning)
                 {
-                    const time_t newDLLWriteTime = SDLGetLastWriteTime("./libpong.so");
+                    const time_t newDLLWriteTime = SDLGetLastWriteTime(state.gameCode.dllPath);
                     if (newDLLWriteTime != state.gameCode.dllLastWriteTime)
                     {
                         SDLUnloadGameCode(&state.gameCode);
-                        SDLLoadGameCode("./libpong.so", &state.gameCode);
+                        SDLLoadGameCode(state.gameCode.dllPath, &state.gameCode);
                     }
 
                     SDL_Event event;
@@ -428,6 +525,8 @@ int main(int argc, char **argv)
                         state.gameCode.UpdateAndRender(&state.gameMemory, &input, 1.0f / 60.0f, &buffer);
                     }
                     SDLUpdateWindow(&buffer, renderer, texture);
+                    /*SDL_RenderCopy(renderer, imageTexture, 0, 0);
+                    SDL_RenderPresent(renderer);*/
 
                     // TODO proper defined number of players
                     // TODO check that this doesn't break input recording/playback

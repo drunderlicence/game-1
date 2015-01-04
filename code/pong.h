@@ -22,6 +22,8 @@ typedef uint64_t uint64;
 typedef float real32;
 typedef double real64;
 
+typedef size_t memory_index;
+
 #if PONG_SLOW
 #define Assert(condition) if (!(condition)) {*(int *)0 = 0;}
 #else
@@ -46,15 +48,18 @@ typedef double real64;
 
 struct OffscreenBuffer
 {
-    const int bytesPerPixel;
-    const int width;
-    const int height;
-    const int pitch;
-    void *const memory;
+    int bytesPerPixel;
+    int width;
+    int height;
+    int pitch;
+    void *memory;
 };
 
-#define RANDOM_NUMBER(name) int name()
-typedef RANDOM_NUMBER(random_number);
+#define PLATFORM_RANDOM_NUMBER(name) int name()
+typedef PLATFORM_RANDOM_NUMBER(platform_random_number);
+
+#define PLATFORM_LOAD_BMP(name) OffscreenBuffer name(const char *const filename, void *bitmapMemory)
+typedef PLATFORM_LOAD_BMP(platform_load_bmp);
 
 struct GameMemory
 {
@@ -66,7 +71,8 @@ struct GameMemory
     //const uint64 transientStorageSize;
     //void *transientStorage;
 
-    random_number *const randomNumber;
+    platform_random_number *const PlatformRandomNumber;
+    platform_load_bmp *const PlatformLoadBMP;
 };
 
 struct IntVector2
@@ -114,6 +120,12 @@ struct GameInput
     GameButtonState quitButton;
 };
 
+enum GameMode
+{
+    Splash,
+    Game,
+};
+
 struct GameTime
 {
     float seconds;
@@ -135,8 +147,17 @@ struct PaddleState
     Vector2 position;
 };
 
+struct MemoryZone
+{
+    memory_index size;
+    uint8 *base;
+    memory_index used;
+};
+
 struct GameState
 {
+    GameMode mode;
+
     GameTime time;
 
     BallState ball;
@@ -144,10 +165,12 @@ struct GameState
 
     int scores[2];
 
-    CoroutineContext *fastCounter;
-    CoroutineContext *slowCounter;
+    CoroutineContext *splashscreenCoro;
+    OffscreenBuffer splashscreenBitmap;
 
     CoroutineContext coroutines[100];
+
+    MemoryZone bitmapsZone;
 };
 
 #define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory, GameInput *input, float dt, OffscreenBuffer *buffer)

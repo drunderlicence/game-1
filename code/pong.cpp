@@ -1,4 +1,5 @@
 #include "pong.h"
+#include "math.h"
 
 inline int RoundFloatToInt(float real)
 {
@@ -27,14 +28,59 @@ inline float clamp(float in, float min, float max)
     return in > min ? (in < max ? in : max) : min;
 }
 
-internal void RenderRect(const float left,
-                         const float top,
-                         const float right,
-                         const float bottom,
-                         const float red,
-                         const float green,
-                         const float blue,
-                         OffscreenBuffer *buffer)
+internal void Blit(const float destLeft, const float destTop,
+                   const float blend,
+                   const OffscreenBuffer *const src,
+                   OffscreenBuffer *dest)
+{
+    const int minX = clamp(RoundFloatToInt(destLeft), 0, dest->width);
+    const int minY = clamp(RoundFloatToInt(destTop), 0, dest->height);
+    const int maxX = clamp(minX + src->width, 0, dest->width);
+    const int maxY = clamp(minY + src->height, 0, dest->height);
+
+    uint8 *srcRow = (uint8 *)src->memory;
+    uint8 *destRow = (uint8 *)dest->memory + minX * dest->bytesPerPixel + minY * dest->pitch;
+
+    Assert(blend >= 0.0f && blend <= 1.0f); // TODO clamping
+    const float oneMinusBlend = 1.0f - blend;
+
+    for (int y = minY; y < maxY; ++y)
+    {
+        uint32 *srcPixel = (uint32 *)srcRow;
+        uint32 *destPixel = (uint32 *)destRow;
+        for (int x = minX; x < maxX; ++x)
+        {
+            // use this for non blending
+            /**destPixel++ = *srcPixel++;*/
+            // will it blend?
+            float r =
+                (float)((*srcPixel & 0x00FF0000) >> 16) * blend +
+                (float)((*destPixel & 0x00FF0000) >> 16) * oneMinusBlend;
+            float g =
+                (float)((*srcPixel & 0x0000FF00) >>  8) * blend +
+                (float)((*destPixel & 0x0000FF00) >>  8) * oneMinusBlend;
+            float b =
+                (float)((*srcPixel & 0x000000FF) >>  0) * blend +
+                (float)((*destPixel & 0x000000FF) >>  0) * oneMinusBlend;
+            *destPixel++ = (((RoundFloatToInt(r) << 16) & 0x00FF0000) |
+                            ((RoundFloatToInt(g) <<  8) & 0x0000FF00) |
+                            ((RoundFloatToInt(b) <<  0) & 0x000000FF));
+            srcPixel++;
+        }
+
+        srcRow += src->pitch;
+        destRow += dest->pitch;
+    }
+}
+
+internal void DrawRect(const float left,
+                       const float top,
+                       const float right,
+                       const float bottom,
+                       const float red,
+                       const float green,
+                       const float blue,
+                       OffscreenBuffer *buffer)
 {
     const int minX = clamp(RoundFloatToInt(left), 0, buffer->width);
     const int minY = clamp(RoundFloatToInt(top), 0, buffer->height);
@@ -276,12 +322,12 @@ internal void DrawPaddle(PaddleState *const paddle, OffscreenBuffer *buffer)
     const float halfPaddleWidth = paddle->width * 0.5f;
     const float halfPaddleHeight = paddle->height * 0.5f;
     const Vector2 topLeft = paddle->position;
-    RenderRect(topLeft.x - halfPaddleWidth,
-               topLeft.y - halfPaddleHeight,
-               topLeft.x + halfPaddleWidth,
-               topLeft.y + halfPaddleHeight,
-               1.0f, 1.0f, 1.0f,
-               buffer);
+    DrawRect(topLeft.x - halfPaddleWidth,
+             topLeft.y - halfPaddleHeight,
+             topLeft.x + halfPaddleWidth,
+             topLeft.y + halfPaddleHeight,
+             1.0f, 1.0f, 1.0f,
+             buffer);
 }
 
 internal CoroutineContext *GetFreeCoroutine(GameState *state)
@@ -296,10 +342,11 @@ internal CoroutineContext *GetFreeCoroutine(GameState *state)
         }
     }
     Assert(c); // Ran out of coroutines
+    c->jmp = CORO_INITIALIZED;
     return c;
 }
 
-internal int counterFunction(CoroutineContext *context, GameTime *time, int updateEveryNthFrame)
+/* internal int counterFunction(CoroutineContext *context, GameTime *time, int updateEveryNthFrame)
 {
     CORO_STACK(int i;
                );
@@ -326,6 +373,50 @@ internal int counterFunction(CoroutineContext *context, GameTime *time, int upda
     }
     printf("Ending coroutine\n");
     CORO_END;
+}*/
+
+internal void SplashCoroutine(CoroutineContext *context,
+                              GameTime *time,
+                              float fadeInTime,
+                              OffscreenBuffer *splashscreenBitmap,
+                              OffscreenBuffer *backbuffer)
+{
+    CORO_STACK(float t0;
+               );
+    float nt;
+    float blend;
+    CORO_BEGIN;
+    stack->t0 = time->seconds;
+    while(time->seconds - stack->t0 <= fadeInTime)
+    {
+        nt = (time->seconds - stack->t0) / fadeInTime;
+        blend = sinf(nt * 1.570796327f);
+        printf("T: %f, blend: %f\n", nt, blend);
+        Blit(0, 0,
+             blend,
+             splashscreenBitmap,
+             backbuffer);
+        YIELD( );
+    }
+    CORO_END;
+}
+
+internal void InitializeZone(MemoryZone *zone, memory_index size, uint8 *base)
+{
+    zone->size = size;
+    zone->base = base;
+    zone->used = 0;
+}
+
+#define PushStruct(zone, type) (type *)PushSize_(zone, sizeof(type))
+#define PushArray(zone, count, type) (type *)PushSize_(zone, (count)*sizeof(type))
+void *PushSize_(MemoryZone *zone, memory_index size)
+{
+    Assert((zone->used + size) <= zone->size);
+    void *result = zone->base + zone->used;
+    zone->used += size;
+
+    return result;
 }
 
 extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
@@ -336,205 +427,210 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
     if (!memory->isInitialized)
     {
-        const int r = memory->randomNumber();
-        printf("%d\n", r);
-
         ResetBall(&gameState->ball,
-                  memory->randomNumber() % 2 == 0 ? -1.0f : 1.0f,
-                  memory->randomNumber() % 2 == 0 ? -1.0f : 1.0f);
+                  memory->PlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f,
+                  memory->PlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f);
 
         ResetPaddle(&gameState->paddle[0], 20.0f);
         ResetPaddle(&gameState->paddle[1], GAME_WIDTH - 20.0f);
 
-        gameState->scores[0] = 0;
-        gameState->scores[1] = 0;
+        //gameState->scores[0] = 0;
+        //gameState->scores[1] = 0;
+
+        InitializeZone(&gameState->bitmapsZone,
+                       memory->permanentStorageSize - sizeof(GameState),
+                       (uint8 *)memory->permanentStorage + sizeof(GameState));
+        gameState->splashscreenBitmap =
+            memory->PlatformLoadBMP("../data/drul.bmp",
+                                    gameState->bitmapsZone.base + gameState->bitmapsZone.used);
+        OffscreenBuffer *bmp = &gameState->splashscreenBitmap;
+        if (bmp->width && bmp->height)
+        {
+            PushSize_(&gameState->bitmapsZone, bmp->width * bmp->height * BYTES_PER_PIXEL);
+            gameState->splashscreenCoro = GetFreeCoroutine(gameState);
+        }
+        else
+        {
+            // TODO logging
+        }
 
         memory->isInitialized = true;
     }
 
     // Clear screen
-    RenderRect(0, 0, GAME_WIDTH, GAME_HEIGHT, 0.0f, 0.5f, 1.0f, buffer);
+    DrawRect(0, 0, GAME_WIDTH, GAME_HEIGHT, 0.0f, 0.0f, 0.0f, buffer);
 
+    switch (gameState->mode)
     {
-        int slowCount;
-        if (!gameState->slowCounter)
+        case Splash:
         {
-            gameState->slowCounter = GetFreeCoroutine(gameState);
-        }
-        slowCount = counterFunction(gameState->slowCounter, &gameState->time, 60);
-        //printf("slow: %d\n", slowCount);
-        DrawBigNumber(BN[slowCount % 10],
-                      10, 10, 10,
-                      1.0f, 1.0f, 1.0f,
-                      buffer);
-    }
-
-    {
-        int fastCount;
-        if (!gameState->fastCounter)
+            if (gameState->splashscreenCoro)
+            {
+                SplashCoroutine(gameState->splashscreenCoro,
+                                &gameState->time,
+                                4.0f,
+                                &gameState->splashscreenBitmap,
+                                buffer);
+                if (!gameState->splashscreenCoro->jmp)
+                {   // coro is over
+                    gameState->splashscreenCoro = 0;
+                    gameState->mode = Game;
+                }
+            }
+        } break;
+        case Game:
         {
-            gameState->fastCounter = GetFreeCoroutine(gameState);
-        }
-        fastCount = counterFunction(gameState->fastCounter, &gameState->time, 30);
-        //printf("fast: %d\n", fastCount);
-        DrawBigNumber(BN[fastCount % 10],
-                      GAME_WIDTH - 10 - 10 * BIG_NUMBER_WIDTH, 10, 10,
-                      1.0f, 1.0f, 1.0f,
-                      buffer);
+
+            // Paddle input
+            UpdatePaddle(&gameState->paddle[0], &input->player[0], dt);
+            UpdatePaddle(&gameState->paddle[1], &input->player[1], dt);
+
+            // Clear screen
+            DrawRect(0, 0, GAME_WIDTH, GAME_HEIGHT, 0.0f, 0.0f, 0.0f, buffer);
+
+            // Update ball
+            BallState *const ball = &gameState->ball;
+            Vector2 newPos;
+            newPos.x = ball->position.x + ball->velocity.x * ball->speed * dt;
+            newPos.y = ball->position.y + ball->velocity.y * ball->speed * dt;
+
+            // Collide ball
+            const float halfBallSize = ball->size * 0.5f;
+            if (newPos.y - halfBallSize < GAME_HUD_HEIGHT && ball->velocity.y < 0.0f)
+            {
+                ball->velocity.y = 1.0f;
+                ball->speed *= 1.1f;
+                newPos.y = GAME_HUD_HEIGHT + halfBallSize;
+            }
+            else if (newPos.y + halfBallSize > GAME_HEIGHT && ball->velocity.y > 0.0f)
+            {
+                ball->velocity.y = -1.0f;
+                ball->speed *= 1.1f;
+                newPos.y = GAME_HEIGHT - halfBallSize;
+            }
+
+            // Collide with paddles
+            bool32 didReset = false;
+            // Player 1
+            {
+                PaddleState *const paddle = &gameState->paddle[0];
+
+                const float halfBallSize = ball->size * 0.5f;
+                const float halfPaddleWidth = paddle->width * 0.5f;
+
+                const bool32 isBeyondPaddle =
+                    newPos.x - halfBallSize <= paddle->position.x + halfPaddleWidth;
+
+                const bool32 wasBeyondPaddle =
+                    ball->position.x - halfBallSize < paddle->position.x + halfPaddleWidth;
+
+                const bool32 isMovingTowardPaddle =
+                    ball->velocity.x < 0.0f;
+
+                const float bounceVelocityX = 1.0f;
+                const float bouncePositionX = halfBallSize + paddle->position.x + halfPaddleWidth;
+
+                const bool32 isOutOfBounds = newPos.x + halfBallSize < 0.0f;
+
+                const bool32 shouldReset = CollideBallWithPaddle(ball,
+                                                                 paddle,
+                                                                 isBeyondPaddle,
+                                                                 wasBeyondPaddle,
+                                                                 isMovingTowardPaddle,
+                                                                 bounceVelocityX,
+                                                                 bouncePositionX,
+                                                                 isOutOfBounds,
+                                                                 &newPos);
+                if (shouldReset)
+                {
+                    didReset = true;
+                    ResetBall(ball,
+                              -1.0f,
+                              memory->PlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f);
+                    gameState->scores[1]++;
+                }
+            }
+            // Player 2
+            {
+                PaddleState *const paddle = &gameState->paddle[1];
+
+                const float halfBallSize = ball->size * 0.5f;
+                const float halfPaddleWidth = paddle->width * 0.5f;
+
+                const bool32 isBeyondPaddle =
+                    newPos.x + halfBallSize >= paddle->position.x - halfPaddleWidth;
+
+                const bool32 wasBeyondPaddle =
+                    ball->position.x + halfBallSize > paddle->position.x - halfPaddleWidth;
+
+                const bool32 isMovingTowardPaddle =
+                    ball->velocity.x > 0.0f;
+
+                const float bounceVelocityX = -1.0f;
+                const float bouncePositionX = paddle->position.x - halfPaddleWidth - halfBallSize;
+
+                const bool32 isOutOfBounds = newPos.x - halfBallSize > GAME_WIDTH;
+
+                const bool32 shouldReset  = CollideBallWithPaddle(ball,
+                                                                  paddle,
+                                                                  isBeyondPaddle,
+                                                                  wasBeyondPaddle,
+                                                                  isMovingTowardPaddle,
+                                                                  bounceVelocityX,
+                                                                  bouncePositionX,
+                                                                  isOutOfBounds,
+                                                                  &newPos);
+                if (shouldReset)
+                {
+                    didReset = true;
+                    ResetBall(ball,
+                              1.0f,
+                              memory->PlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f);
+                    gameState->scores[0]++;
+                }
+            }
+
+            if (!didReset)
+            {
+                ball->position = newPos;
+            }
+
+            // Draw HUD
+            {
+                DrawBigNumber(BN[gameState->scores[0] % 10],
+                              10, 10, 10,
+                              1.0f, 1.0f, 1.0f,
+                              buffer);
+                DrawBigNumber(BN[gameState->scores[1] % 10],
+                              GAME_WIDTH - 10 - 10 * BIG_NUMBER_WIDTH, 10, 10,
+                              1.0f, 1.0f, 1.0f,
+                              buffer);
+                DrawLineHorz(0.0f, GAME_WIDTH, GAME_HUD_HEIGHT,
+                             1.0f, 1.0f, 1.0f,
+                             buffer);
+                const float gray = 0.25f;
+                const float offset = 15.0f;
+                DrawLineVert(GAME_HUD_HEIGHT + offset, GAME_HEIGHT - offset, GAME_WIDTH * 0.5,
+                             gray, gray, gray,
+                             buffer);
+            }
+
+            // Draw ball
+            {
+                const Vector2 topLeft = ball->position;
+                DrawRect(topLeft.x - halfBallSize,
+                         topLeft.y - halfBallSize,
+                         topLeft.x + halfBallSize,
+                         topLeft.y + halfBallSize,
+                         1.0f, 1.0f, 1.0f,
+                         buffer);
+            }
+
+            // Draw paddles
+            DrawPaddle(&gameState->paddle[0], buffer);
+            DrawPaddle(&gameState->paddle[1], buffer);
+        } break;
     }
-
-#if 0
-
-    // Paddle input
-    UpdatePaddle(&gameState->paddle[0], &input->player[0], dt);
-    UpdatePaddle(&gameState->paddle[1], &input->player[1], dt);
-
-    // Clear screen
-    RenderRect(0, 0, GAME_WIDTH, GAME_HEIGHT, 0.0f, 0.0f, 0.0f, buffer);
-
-    // Update ball
-    BallState *const ball = &gameState->ball;
-    Vector2 newPos;
-    newPos.x = ball->position.x + ball->velocity.x * ball->speed * dt;
-    newPos.y = ball->position.y + ball->velocity.y * ball->speed * dt;
-
-    // Collide ball
-    const float halfBallSize = ball->size * 0.5f;
-    if (newPos.y - halfBallSize < GAME_HUD_HEIGHT && ball->velocity.y < 0.0f)
-    {
-        ball->velocity.y = 1.0f;
-        ball->speed *= 1.1f;
-        newPos.y = GAME_HUD_HEIGHT + halfBallSize;
-    }
-    else if (newPos.y + halfBallSize > GAME_HEIGHT && ball->velocity.y > 0.0f)
-    {
-        ball->velocity.y = -1.0f;
-        ball->speed *= 1.1f;
-        newPos.y = GAME_HEIGHT - halfBallSize;
-    }
-
-    // Collide with paddles
-     bool32 didReset = false;
-    // Player 1
-    {
-        PaddleState *const paddle = &gameState->paddle[0];
-
-        const float halfBallSize = ball->size * 0.5f;
-        const float halfPaddleWidth = paddle->width * 0.5f;
-
-        const bool32 isBeyondPaddle =
-            newPos.x - halfBallSize <= paddle->position.x + halfPaddleWidth;
-
-        const bool32 wasBeyondPaddle =
-            ball->position.x - halfBallSize < paddle->position.x + halfPaddleWidth;
-
-        const bool32 isMovingTowardPaddle =
-            ball->velocity.x < 0.0f;
-
-        const float bounceVelocityX = 1.0f;
-        const float bouncePositionX = halfBallSize + paddle->position.x + halfPaddleWidth;
-
-        const bool32 isOutOfBounds = newPos.x + halfBallSize < 0.0f;
-
-        const bool32 shouldReset = CollideBallWithPaddle(ball,
-                                                         paddle,
-                                                         isBeyondPaddle,
-                                                         wasBeyondPaddle,
-                                                         isMovingTowardPaddle,
-                                                         bounceVelocityX,
-                                                         bouncePositionX,
-                                                         isOutOfBounds,
-                                                         &newPos);
-        if (shouldReset)
-        {
-            didReset = true;
-            ResetBall(ball,
-                      -1.0f,
-                      memory->randomNumber() % 2 == 0 ? -1.0f : 1.0f);
-            gameState->scores[1]++;
-        }
-    }
-    // Player 2
-    {
-        PaddleState *const paddle = &gameState->paddle[1];
-
-        const float halfBallSize = ball->size * 0.5f;
-        const float halfPaddleWidth = paddle->width * 0.5f;
-
-        const bool32 isBeyondPaddle =
-            newPos.x + halfBallSize >= paddle->position.x - halfPaddleWidth;
-
-        const bool32 wasBeyondPaddle =
-            ball->position.x + halfBallSize > paddle->position.x - halfPaddleWidth;
-
-        const bool32 isMovingTowardPaddle =
-            ball->velocity.x > 0.0f;
-
-        const float bounceVelocityX = -1.0f;
-        const float bouncePositionX = paddle->position.x - halfPaddleWidth - halfBallSize;
-
-        const bool32 isOutOfBounds = newPos.x - halfBallSize > GAME_WIDTH;
-
-        const bool32 shouldReset  = CollideBallWithPaddle(ball,
-                                                          paddle,
-                                                          isBeyondPaddle,
-                                                          wasBeyondPaddle,
-                                                          isMovingTowardPaddle,
-                                                          bounceVelocityX,
-                                                          bouncePositionX,
-                                                          isOutOfBounds,
-                                                          &newPos);
-        if (shouldReset)
-        {
-            didReset = true;
-            ResetBall(ball,
-                      1.0f,
-                      memory->randomNumber() % 2 == 0 ? -1.0f : 1.0f);
-            gameState->scores[0]++;
-        }
-    }
-
-    if (!didReset)
-    {
-        ball->position = newPos;
-    }
-
-    // Draw HUD
-    {
-        DrawBigNumber(BN[gameState->scores[0] % 10],
-                      10, 10, 10,
-                      1.0f, 1.0f, 1.0f,
-                      buffer);
-        DrawBigNumber(BN[gameState->scores[1] % 10],
-                      GAME_WIDTH - 10 - 10 * BIG_NUMBER_WIDTH, 10, 10,
-                      1.0f, 1.0f, 1.0f,
-                      buffer);
-        DrawLineHorz(0.0f, GAME_WIDTH, GAME_HUD_HEIGHT,
-                     1.0f, 1.0f, 1.0f,
-                     buffer);
-        const float gray = 0.25f;
-        const float offset = 15.0f;
-        DrawLineVert(GAME_HUD_HEIGHT + offset, GAME_HEIGHT - offset, GAME_WIDTH * 0.5,
-                     gray, gray, gray,
-                     buffer);
-    }
-
-    // Draw ball
-    {
-        const Vector2 topLeft = ball->position;
-        RenderRect(topLeft.x - halfBallSize,
-                   topLeft.y - halfBallSize,
-                   topLeft.x + halfBallSize,
-                   topLeft.y + halfBallSize,
-                   1.0f, 1.0f, 1.0f,
-                   buffer);
-    }
-
-    // Draw paddles
-    DrawPaddle(&gameState->paddle[0], buffer);
-    DrawPaddle(&gameState->paddle[1], buffer);
-
-#endif
 
     gameState->time.seconds += dt;
     ++gameState->time.frameCount;
