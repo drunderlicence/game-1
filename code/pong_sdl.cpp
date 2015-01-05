@@ -402,96 +402,97 @@ int main(int argc, char **argv)
                         {
                             case SDL_KEYDOWN:
                             case SDL_KEYUP:
+                            {
+                                const SDL_Keycode keyCode = event.key.keysym.sym;
+                                bool32 isDown = event.key.state == SDL_PRESSED;
+                                input.anyButton.isDown = isDown;
+                                if (keyCode == SDLK_ESCAPE)
                                 {
-                                    const SDL_Keycode keyCode = event.key.keysym.sym;
-                                    bool32 isDown = event.key.state == SDL_PRESSED;
-                                    if (keyCode == SDLK_ESCAPE)
+                                    printf("Escape, quit\n");
+                                    globalIsRunning = false;
+                                }
+                                else if (keyCode == SDLK_UP)
+                                {
+                                    input.player[1].moveUp.isDown = isDown;
+                                    input.player[1].isUsingKeyboard = true;
+                                }
+                                else if (keyCode == SDLK_DOWN)
+                                {
+                                    input.player[1].moveDown.isDown = isDown;
+                                    input.player[1].isUsingKeyboard = true;
+                                }
+                                else if (keyCode == SDLK_w)
+                                {
+                                    input.player[0].moveUp.isDown = isDown;
+                                    input.player[0].isUsingKeyboard = true;
+                                }
+                                else if (keyCode == SDLK_s)
+                                {
+                                    input.player[0].moveDown.isDown = isDown;
+                                    input.player[0].isUsingKeyboard = true;
+                                }
+                                else if (keyCode == SDLK_l)
+                                {
+                                    if (isDown && event.key.repeat == 0)
                                     {
-                                        printf("Escape, quit\n");
-                                        globalIsRunning = false;
-                                    }
-                                    else if (keyCode == SDLK_UP)
-                                    {
-                                        input.player[1].moveUp.isDown = isDown;
-                                        input.player[1].isUsingKeyboard = true;
-                                    }
-                                    else if (keyCode == SDLK_DOWN)
-                                    {
-                                        input.player[1].moveDown.isDown = isDown;
-                                        input.player[1].isUsingKeyboard = true;
-                                    }
-                                    else if (keyCode == SDLK_w)
-                                    {
-                                        input.player[0].moveUp.isDown = isDown;
-                                        input.player[0].isUsingKeyboard = true;
-                                    }
-                                    else if (keyCode == SDLK_s)
-                                    {
-                                        input.player[0].moveDown.isDown = isDown;
-                                        input.player[0].isUsingKeyboard = true;
-                                    }
-                                    else if (keyCode == SDLK_l)
-                                    {
-                                        if (isDown && event.key.repeat == 0)
+                                        if (state.replayPlaybackIndex == 0)
                                         {
-                                            if (state.replayPlaybackIndex == 0)
+                                            // not recording
+                                            if (state.replayRecordingIndex == 0)
                                             {
-                                                // not recording
-                                                if (state.replayRecordingIndex == 0)
-                                                {
-                                                    printf("Start recording input\n");
-                                                    SDLBeginRecordingInput(&state);
-                                                }
-                                                else
-                                                {
-                                                    printf("Stop recording input\n");
-                                                    SDLEndRecordingInput(&state);
-                                                    printf("Start playing input\n");
-                                                    SDLBeginPlaybackInput(&state);
-                                                }
+                                                printf("Start recording input\n");
+                                                SDLBeginRecordingInput(&state);
                                             }
                                             else
                                             {
-                                                printf("Stop playing input\n");
-                                                SDLEndPlaybackInput(&state);
+                                                printf("Stop recording input\n");
+                                                SDLEndRecordingInput(&state);
+                                                printf("Start playing input\n");
+                                                SDLBeginPlaybackInput(&state);
                                             }
                                         }
+                                        else
+                                        {
+                                            printf("Stop playing input\n");
+                                            SDLEndPlaybackInput(&state);
+                                        }
                                     }
-                                    else
-                                    {
-                                        input.anyButton.isDown = isDown;
-                                    }
-                                } break;
+                                }
+                            } break;
                             case SDL_JOYAXISMOTION:
+                            {
+                                if (input.onePlayerMode)
                                 {
-                                    if (input.onePlayerMode)
+                                    // TODO handle joysticks connecting, disconnecting
+                                    //      handle switching into two player mode
+                                    if (controllers[0])
                                     {
-                                        // TODO handle joysticks connecting, disconnecting
-                                        //      handle switching into two player mode
-                                        if (controllers[0])
+                                        input.player[0].isUsingJoystick = true;
+                                        input.player[1].isUsingJoystick = true;
+                                    }
+                                }
+                                else
+                                {
+                                    // TODO handle joysticks connecting, disconnecting
+                                    //      handle switching into one player mode
+                                    for (int i = 0; i < ArrayCount(controllers); ++i)
+                                    {
+                                        if (controllers[i] && event.jaxis.which == i)
                                         {
-                                            input.player[0].isUsingJoystick = true;
-                                            input.player[1].isUsingJoystick = true;
+                                            input.player[i].isUsingJoystick = true;
                                         }
                                     }
-                                    else
-                                    {
-                                        // TODO handle joysticks connecting, disconnecting
-                                        //      handle switching into one player mode
-                                        for (int i = 0; i < ArrayCount(controllers); ++i)
-                                        {
-                                            if (controllers[i] && event.jaxis.which == i)
-                                            {
-                                                input.player[i].isUsingJoystick = true;
-                                            }
-                                        }
-                                    }
-                                } break;
+                                }
+                            } break;
+                            case SDL_JOYBUTTONDOWN:
+                            {
+                                input.anyButton.isDown = true;
+                            } break;
                             case SDL_QUIT:
-                                {
-                                    printf("SDL_QUIT\n");
-                                    globalIsRunning = false;
-                                } break;
+                            {
+                                printf("SDL_QUIT\n");
+                                globalIsRunning = false;
+                            } break;
                         }
                     }
 
@@ -541,6 +542,7 @@ int main(int argc, char **argv)
                         input.player[i].isUsingJoystick = false;
                         input.player[i].isUsingKeyboard = false;
                     }
+                    input.anyButton.isDown = false;
                 }
             }
 

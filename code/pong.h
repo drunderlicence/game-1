@@ -42,6 +42,7 @@ typedef size_t memory_index;
 #define BYTES_PER_PIXEL 4
 #define GAME_HUD_HEIGHT 80
 #define GAME_PLAY_HEIGHT (GAME_HEIGHT - GAME_HUD_HEIGHT)
+#define WIN_SCORE 9
 
 #include "big_numbers.h"
 #include "coroutines.h"
@@ -123,6 +124,7 @@ struct GameInput
 enum GameMode
 {
     Splash,
+    Titles,
     Game,
 };
 
@@ -165,12 +167,17 @@ struct GameState
 
     int scores[2];
 
-    CoroutineContext *splashscreenCoro;
-    OffscreenBuffer splashscreenBitmap;
+    //OffscreenBuffer splashscreenBitmap;
 
+    CoroutineContext *splashscreenCoro;
     CoroutineContext coroutines[100];
 
     MemoryZone bitmapsZone;
+    OffscreenBuffer bitmaps[100];
+    int nextBmp;
+    OffscreenBuffer *splashscreenBitmap;
+    OffscreenBuffer *titlesBitmap;
+    OffscreenBuffer *promptBitmap;
 };
 
 #define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory, GameInput *input, float dt, OffscreenBuffer *buffer)

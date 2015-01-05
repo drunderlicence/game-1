@@ -390,12 +390,17 @@ internal void SplashCoroutine(CoroutineContext *context,
     while(time->seconds - stack->t0 <= fadeInTime)
     {
         nt = (time->seconds - stack->t0) / fadeInTime;
-        blend = sinf(nt * 1.570796327f);
+        blend = sinf(nt * 3.141592654f);
         //printf("T: %f, blend: %f\n", nt, blend);
         Blit(0, 0,
              blend,
              splashscreenBitmap,
              backbuffer);
+        YIELD( );
+    }
+    stack->t0 = time->seconds;
+    while(time->seconds - stack->t0 <= fadeInTime * 0.2f)
+    {
         YIELD( );
     }
     CORO_END;
@@ -419,6 +424,25 @@ void *PushSize_(MemoryZone *zone, memory_index size)
     return result;
 }
 
+internal OffscreenBuffer *LoadBitmap(GameMemory *memory, GameState *state, const char *filename)
+{
+    OffscreenBuffer *bmp = &state->bitmaps[state->nextBmp++];
+    Assert(state->nextBmp < ArrayCount(state->bitmaps));
+
+    *bmp = memory->PlatformLoadBMP(filename, state->bitmapsZone.base + state->bitmapsZone.used);
+    if (bmp->width && bmp->height)
+    {
+        PushSize_(&state->bitmapsZone, bmp->width * bmp->height * BYTES_PER_PIXEL);
+        return bmp;
+    }
+    else
+    {
+        Assert(bmp->width && bmp->height);
+        // TODO logging
+        return 0;
+    }
+}
+
 extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 {
     Assert(sizeof(GameState) <= memory->permanentStorageSize);
@@ -427,6 +451,8 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
     if (!memory->isInitialized)
     {
+        //gameState->mode = Tiles;
+
         ResetBall(&gameState->ball,
                   memory->PlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f,
                   memory->PlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f);
@@ -434,25 +460,19 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         ResetPaddle(&gameState->paddle[0], 20.0f);
         ResetPaddle(&gameState->paddle[1], GAME_WIDTH - 20.0f);
 
-        //gameState->scores[0] = 0;
-        //gameState->scores[1] = 0;
-
         InitializeZone(&gameState->bitmapsZone,
                        memory->permanentStorageSize - sizeof(GameState),
                        (uint8 *)memory->permanentStorage + sizeof(GameState));
-        gameState->splashscreenBitmap =
-            memory->PlatformLoadBMP("../data/drul.bmp",
-                                    gameState->bitmapsZone.base + gameState->bitmapsZone.used);
-        OffscreenBuffer *bmp = &gameState->splashscreenBitmap;
-        if (bmp->width && bmp->height)
+
+        // TODO proper resource paths
+        gameState->splashscreenBitmap = LoadBitmap(memory, gameState, "../data/drul.bmp");
+        if (gameState->splashscreenBitmap)
         {
-            PushSize_(&gameState->bitmapsZone, bmp->width * bmp->height * BYTES_PER_PIXEL);
             gameState->splashscreenCoro = GetFreeCoroutine(gameState);
         }
-        else
-        {
-            // TODO logging
-        }
+
+        gameState->titlesBitmap = LoadBitmap(memory, gameState, "../data/titlesScreen.bmp");
+        gameState->promptBitmap = LoadBitmap(memory, gameState, "../data/pressAnyKey.bmp");
 
         memory->isInitialized = true;
     }
@@ -469,24 +489,34 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                 SplashCoroutine(gameState->splashscreenCoro,
                                 &gameState->time,
                                 4.0f,
-                                &gameState->splashscreenBitmap,
+                                gameState->splashscreenBitmap,
                                 buffer);
                 if (!gameState->splashscreenCoro->jmp)
                 {   // coro is over
                     gameState->splashscreenCoro = 0;
-                    gameState->mode = Game;
+                    gameState->mode = Titles;
                 }
             }
         } break;
+        case Titles:
+        {
+            if (input->anyButton.isDown)
+            {
+                gameState->mode = Game;
+            }
+
+            Blit(0, 0, 1.0f, gameState->titlesBitmap, buffer);
+            if ((gameState->time.frameCount / 50) % 3 == 0)
+            {
+                Blit(0, 300, 1.0f, gameState->promptBitmap, buffer);
+            }
+            //DrawLineHorz(0.0f, GAME_WIDTH, GAME_HUD_HEIGHT, 1.0f, 1.0f, 1.0f, buffer);
+        } break;
         case Game:
         {
-
             // Paddle input
             UpdatePaddle(&gameState->paddle[0], &input->player[0], dt);
             UpdatePaddle(&gameState->paddle[1], &input->player[1], dt);
-
-            // Clear screen
-            DrawRect(0, 0, GAME_WIDTH, GAME_HEIGHT, 0.0f, 0.0f, 0.0f, buffer);
 
             // Update ball
             BallState *const ball = &gameState->ball;
@@ -593,6 +623,23 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             if (!didReset)
             {
                 ball->position = newPos;
+            }
+
+            if (gameState->scores[0] > WIN_SCORE || gameState->scores[1] > WIN_SCORE)
+            {
+                // TODO proper game resetting
+                // TODO win state for correct player
+                ResetBall(&gameState->ball,
+                          memory->PlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f,
+                          memory->PlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f);
+
+                ResetPaddle(&gameState->paddle[0], 20.0f);
+                ResetPaddle(&gameState->paddle[1], GAME_WIDTH - 20.0f);
+
+                gameState->scores[0] = 0;
+                gameState->scores[1] = 0;
+
+                gameState->mode = Titles;
             }
 
             // Draw HUD
