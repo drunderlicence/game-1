@@ -141,6 +141,8 @@ struct BallState
     Vector2 position;
     float speed;
     Vector2 velocity;
+
+    CoroutineContext *bounceCoro;
 };
 
 struct PaddleState

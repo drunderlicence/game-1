@@ -28,6 +28,22 @@ inline float clamp(float in, float min, float max)
     return in > min ? (in < max ? in : max) : min;
 }
 
+internal CoroutineContext *GetFreeCoroutine(GameState *state)
+{
+    CoroutineContext *c = 0;
+    for (int i = 0; i < ArrayCount(state->coroutines); ++i)
+    {
+        if (!state->coroutines[i].jmp)
+        {
+            c = &state->coroutines[i];
+            break;
+        }
+    }
+    Assert(c); // Ran out of coroutines
+    c->jmp = CORO_INITIALIZED;
+    return c;
+}
+
 internal void Blit(const float destLeft, const float destTop,
                    const float blend,
                    const OffscreenBuffer *const src,
@@ -326,7 +342,7 @@ internal void UpdatePaddle(PaddleState *const paddle,
         const float newWidth = paddle->restWidth * (1.0f / scale);
         paddle->width += (newWidth - paddle->width) * paddleSpeedSmoothing;
     }
-        printf("%f %f\n", paddle->height, paddle->width);
+    //printf("%f %f\n", paddle->height, paddle->width);
     //paddle->width = paddle->restWidth * (1.0f + dy);
 
     const float halfPaddleHeight = paddle->height * 0.5f;
@@ -340,7 +356,8 @@ internal void UpdatePaddle(PaddleState *const paddle,
     }
 }
 
-internal bool CollideBallWithPaddle(BallState *const ball,
+internal bool CollideBallWithPaddle(GameState *gameState,
+                                    BallState *const ball,
                                     PaddleState *const paddle,
                                     const bool32 isBeyondPaddle,
                                     const bool32 wasBeyondPaddle,
@@ -365,6 +382,11 @@ internal bool CollideBallWithPaddle(BallState *const ball,
             {
                 ball->velocity.x = bounceVelocityX;
                 newPos->x = bouncePositionX;
+
+                if (!ball->bounceCoro) // don't do bounce effect if one is already playing
+                {
+                    ball->bounceCoro = GetFreeCoroutine(gameState);
+                }
             }
         }
         else
@@ -373,12 +395,18 @@ internal bool CollideBallWithPaddle(BallState *const ball,
             {
                 resetBall = true;
             }
+            // TODO FIXME juicing the ball and paddle sizes breaks this edge bouncing in certain cases
             else if (overlapPaddleTop &&
                      //ball->velocity.y > 0.0f &&
                      newPos->y < paddle->position.y)
             {
                 ball->velocity.y = -1.0f;
                 newPos->y = paddle->position.y - halfPaddleHeight - ball->radius;
+
+                if (!ball->bounceCoro) // don't do bounce effect if one is already playing
+                {
+                    ball->bounceCoro = GetFreeCoroutine(gameState);
+                }
             }
             else if (overlapPaddleBottom &&
                      //ball->velocity.y < 0.0f &&
@@ -389,6 +417,11 @@ internal bool CollideBallWithPaddle(BallState *const ball,
                 // but should paddle-stops-ball?
                 paddle->position.y = newPos->y - ball->radius - halfPaddleHeight;
                 //newPos->y = ball->radius + paddle->position.y + halfPaddleHeight;
+                //
+                if (!ball->bounceCoro) // don't do bounce effect if one is already playing
+                {
+                    ball->bounceCoro = GetFreeCoroutine(gameState);
+                }
             }
         }
     }
@@ -408,51 +441,6 @@ internal void DrawPaddle(PaddleState *const paddle, OffscreenBuffer *buffer)
              1.0f, 1.0f, 1.0f,
              buffer);
 }
-
-internal CoroutineContext *GetFreeCoroutine(GameState *state)
-{
-    CoroutineContext *c = 0;
-    for (int i = 0; i < ArrayCount(state->coroutines); ++i)
-    {
-        if (!state->coroutines[i].jmp)
-        {
-            c = &state->coroutines[i];
-            break;
-        }
-    }
-    Assert(c); // Ran out of coroutines
-    c->jmp = CORO_INITIALIZED;
-    return c;
-}
-
-/* internal int counterFunction(CoroutineContext *context, GameTime *time, int updateEveryNthFrame)
-{
-    CORO_STACK(int i;
-               );
-    const int MAX = 5;
-
-    CORO_BEGIN;
-    while (true)
-    {
-        for (stack->i = 0; stack->i < MAX; ++stack->i)
-        {
-            do
-            {
-                YIELD(stack->i);
-            } while (time->frameCount % updateEveryNthFrame != 0);
-        }
-
-        for (stack->i = MAX; stack->i > 0; --stack->i)
-        {
-            do
-            {
-                YIELD(stack->i);
-            } while (time->frameCount % updateEveryNthFrame != 0);
-        }
-    }
-    printf("Ending coroutine\n");
-    CORO_END;
-}*/
 
 internal void SplashCoroutine(CoroutineContext *context,
                               GameTime *time,
@@ -482,6 +470,32 @@ internal void SplashCoroutine(CoroutineContext *context,
     {
         YIELD( );
     }
+    CORO_END;
+}
+
+internal void BounceSizeCoroutine(CoroutineContext *context,
+                                  GameTime *time,
+                                  float timeSpan,
+                                  float bounceScale,
+                                  float *a)
+{
+    CORO_STACK(float t0;
+               float a0;
+               );
+
+    CORO_BEGIN;
+
+    stack->t0 = time->seconds;
+    stack->a0 = *a;
+
+    while (time->seconds - stack->t0 <= timeSpan)
+    {
+        *a = stack->a0 * bounceScale;
+        YIELD( );
+    }
+
+    *a = stack->a0;
+
     CORO_END;
 }
 
@@ -628,12 +642,22 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                 ball->velocity.y = 1.0f;
                 ball->speed *= 1.1f;
                 newPos.y = GAME_HUD_HEIGHT + ball->radius;
+
+                if (!ball->bounceCoro) // don't do bounce effect if one is already playing
+                {
+                    ball->bounceCoro = GetFreeCoroutine(gameState);
+                }
             }
             else if (newPos.y + ball->radius > GAME_HEIGHT && ball->velocity.y > 0.0f)
             {
                 ball->velocity.y = -1.0f;
                 ball->speed *= 1.1f;
                 newPos.y = GAME_HEIGHT - ball->radius;
+
+                if (!ball->bounceCoro) // don't do bounce effect if one is already playing
+                {
+                    ball->bounceCoro = GetFreeCoroutine(gameState);
+                }
             }
 
             // Collide with paddles
@@ -658,7 +682,8 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
                 const bool32 isOutOfBounds = newPos.x + ball->radius < 0.0f;
 
-                const bool32 shouldReset = CollideBallWithPaddle(ball,
+                const bool32 shouldReset = CollideBallWithPaddle(gameState,
+                                                                 ball,
                                                                  paddle,
                                                                  isBeyondPaddle,
                                                                  wasBeyondPaddle,
@@ -696,7 +721,8 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
                 const bool32 isOutOfBounds = newPos.x - ball->radius > GAME_WIDTH;
 
-                const bool32 shouldReset  = CollideBallWithPaddle(ball,
+                const bool32 shouldReset  = CollideBallWithPaddle(gameState,
+                                                                  ball,
                                                                   paddle,
                                                                   isBeyondPaddle,
                                                                   wasBeyondPaddle,
@@ -718,6 +744,20 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             if (!didReset)
             {
                 ball->position = newPos;
+            }
+
+            // Update ball bounce coroutine, if there is one going
+            if (ball->bounceCoro)
+            {
+                BounceSizeCoroutine(ball->bounceCoro,
+                                    &gameState->time,
+                                    0.1f,
+                                    1.5f,
+                                    &ball->radius);
+                if (!ball->bounceCoro->jmp)
+                {   // coro is over
+                    ball->bounceCoro = 0;
+                }
             }
 
             if (gameState->scores[0] == WIN_SCORE || gameState->scores[1] == WIN_SCORE)
