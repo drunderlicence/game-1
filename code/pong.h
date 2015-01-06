@@ -42,7 +42,7 @@ typedef size_t memory_index;
 #define BYTES_PER_PIXEL 4
 #define GAME_HUD_HEIGHT 80
 #define GAME_PLAY_HEIGHT (GAME_HEIGHT - GAME_HUD_HEIGHT)
-#define WIN_SCORE 9
+#define WIN_SCORE 3
 
 #include "big_numbers.h"
 #include "coroutines.h"
@@ -126,6 +126,7 @@ enum GameMode
     Splash,
     Titles,
     Game,
+    WinScreen,
 };
 
 struct GameTime
@@ -136,7 +137,7 @@ struct GameTime
 
 struct BallState
 {
-    float size;
+    float radius;
     Vector2 position;
     float speed;
     Vector2 velocity;
@@ -170,6 +171,7 @@ struct GameState
     //OffscreenBuffer splashscreenBitmap;
 
     CoroutineContext *splashscreenCoro;
+    CoroutineContext *winCoro;
     CoroutineContext coroutines[100];
 
     MemoryZone bitmapsZone;
@@ -178,6 +180,7 @@ struct GameState
     OffscreenBuffer *splashscreenBitmap;
     OffscreenBuffer *titlesBitmap;
     OffscreenBuffer *promptBitmap;
+    OffscreenBuffer *winnerBitmap;
 };
 
 #define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory, GameInput *input, float dt, OffscreenBuffer *buffer)
