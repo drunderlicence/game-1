@@ -247,10 +247,10 @@ internal void ResetBall(BallState *ball, const float x, const float y)
 
 internal void ResetPaddle(PaddleState *paddle, float x)
 {
-    paddle->width = 10.0f;
-    paddle->height = 60.0f;
-    paddle->position.x = x;
-    paddle->position.y = GAME_HUD_HEIGHT + GAME_PLAY_HEIGHT * 0.5f;
+    paddle->restWidth = paddle->width = 10.0f;
+    paddle->restHeight = paddle->height = 60.0f;
+    paddle->newPosition.x = paddle->position.x = x;
+    paddle->newPosition.y = paddle->position.y = GAME_HUD_HEIGHT + GAME_PLAY_HEIGHT * 0.5f;
 }
 
 internal void ResetGameSession(GameMemory *memory, GameState *gameState)
@@ -266,37 +266,77 @@ internal void ResetGameSession(GameMemory *memory, GameState *gameState)
     gameState->scores[1] = 0;
 }
 
+inline float lerp(float a, float b, float t)
+{
+    return (1.0f - t) * a + t * b;
+}
+
 internal void UpdatePaddle(PaddleState *const paddle,
                            GamePlayerInput *const playerInput,
                            const float dt)
 {
+    const float lastY = paddle->position.y;
+    const float paddleSmoothing = 0.5f;
+    const float paddleSpeedSmoothing = 0.5f;
+    const float paddleStretchScale = GAME_HEIGHT * 0.25f;
+    const float paddleMaxStretch = 3.0f;
+    const float paddleMoveSpeed = 600.0f / paddleSmoothing;
+
     if(playerInput->isUsingJoystick)
     {
         const float center = GAME_HUD_HEIGHT + GAME_PLAY_HEIGHT * 0.5f;
-        const float dY = (float)((GAME_HEIGHT - GAME_HUD_HEIGHT) - paddle->height) / 2.0f;
-        paddle->position.y = center + dY * playerInput->joystickAxis;
+        const float offsetY = (float)((GAME_HEIGHT - GAME_HUD_HEIGHT) - paddle->height) / 2.0f;
+        paddle->newPosition.y = center + offsetY * playerInput->joystickAxis;
     }
     else
     {
-        const float paddleMoveSpeed = 300.0f;
         if (playerInput->moveUp.isDown)
         {
-            paddle->position.y -= paddleMoveSpeed * dt;
+            paddle->newPosition.y = paddle->position.y - paddleMoveSpeed * dt;
         }
         if (playerInput->moveDown.isDown)
         {
-            paddle->position.y += paddleMoveSpeed * dt;
+            paddle->newPosition.y = paddle->position.y + paddleMoveSpeed * dt;
         }
+    }
 
-        const float halfPaddleHeight = paddle->height * 0.5f;
-        if (paddle->position.y - halfPaddleHeight < GAME_HUD_HEIGHT)
-        {
-            paddle->position.y = GAME_HUD_HEIGHT + halfPaddleHeight;
-        }
-        if (paddle->position.y + halfPaddleHeight > GAME_HEIGHT)
-        {
-            paddle->position.y = GAME_HEIGHT - halfPaddleHeight;
-        }
+    paddle->position.y += (paddle->newPosition.y - paddle->position.y) * paddleSmoothing;
+
+    float dy = lastY - paddle->position.y;
+    if (dy < 0.0f) // TODO abs
+    {
+        dy = -dy;
+    }
+    dy /= paddleStretchScale;
+    // TODO clamp
+    if (dy > 1.0f)
+    {
+        dy = 1.0f;
+    }
+    else if (dy < 0.0f)
+    {
+        dy = 0.0f;
+    }
+    const float scale = lerp(1.0f, paddleMaxStretch, dy);
+    {
+        const float newHeight = paddle->restHeight * scale;
+        paddle->height += (newHeight - paddle->height) * paddleSpeedSmoothing;
+    }
+    {
+        const float newWidth = paddle->restWidth * (1.0f / scale);
+        paddle->width += (newWidth - paddle->width) * paddleSpeedSmoothing;
+    }
+        printf("%f %f\n", paddle->height, paddle->width);
+    //paddle->width = paddle->restWidth * (1.0f + dy);
+
+    const float halfPaddleHeight = paddle->height * 0.5f;
+    if (paddle->position.y - halfPaddleHeight < GAME_HUD_HEIGHT)
+    {
+        paddle->position.y = GAME_HUD_HEIGHT + halfPaddleHeight;
+    }
+    if (paddle->position.y + halfPaddleHeight > GAME_HEIGHT)
+    {
+        paddle->position.y = GAME_HEIGHT - halfPaddleHeight;
     }
 }
 
@@ -682,7 +722,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
             if (gameState->scores[0] == WIN_SCORE || gameState->scores[1] == WIN_SCORE)
             {
-                gameState->mode = WinScreen;
+                //gameState->mode = WinScreen;
             }
 
             // Draw HUD

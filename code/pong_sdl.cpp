@@ -1,4 +1,4 @@
-#include "pong.h"
+    #include "pong.h"
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -316,6 +316,7 @@ int main(int argc, char **argv)
         }
     }
 
+    // TODO grab and hide mouse
 
     SDL_Window *const window = SDL_CreateWindow("Pong",
                                                 100, 100,

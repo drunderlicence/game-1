@@ -147,7 +147,10 @@ struct PaddleState
 {
     float width;
     float height;
+    float restWidth;
+    float restHeight;
     Vector2 position;
+    Vector2 newPosition;
 };
 
 struct MemoryZone
