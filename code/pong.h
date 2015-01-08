@@ -56,11 +56,20 @@ struct OffscreenBuffer
     void *memory;
 };
 
-#define PLATFORM_RANDOM_NUMBER(name) int name()
-typedef PLATFORM_RANDOM_NUMBER(platform_random_number);
+#define DEBUG_PLATFORM_RANDOM_NUMBER(name) int name()
+typedef DEBUG_PLATFORM_RANDOM_NUMBER(debug_platform_random_number);
 
-#define PLATFORM_LOAD_BMP(name) OffscreenBuffer name(const char *const filename, void *bitmapMemory)
-typedef PLATFORM_LOAD_BMP(platform_load_bmp);
+struct DEBUGReadFileResult
+{
+    uint32 size;
+    void *contents;
+};
+
+#define DEBUG_PLATFORM_FREE_FILE_MEMORY(name) void name(void *memory)
+typedef DEBUG_PLATFORM_FREE_FILE_MEMORY(debug_platform_free_file_memory);
+
+#define DEBUG_PLATFORM_READ_ENTIRE_FILE(name) DEBUGReadFileResult name(char *filename)
+typedef DEBUG_PLATFORM_READ_ENTIRE_FILE(debug_platform_read_entire_file);
 
 struct GameMemory
 {
@@ -72,8 +81,9 @@ struct GameMemory
     //const uint64 transientStorageSize;
     //void *transientStorage;
 
-    platform_random_number *const PlatformRandomNumber;
-    platform_load_bmp *const PlatformLoadBMP;
+    debug_platform_random_number *const DEBUGPlatformRandomNumber;
+    debug_platform_free_file_memory *const DEBUGPlatformFreeFileMemory;
+    debug_platform_read_entire_file *const DEBUGPlatFormReadEntireFile;
 };
 
 struct IntVector2
@@ -172,8 +182,6 @@ struct GameState
     PaddleState paddle[2];
 
     int scores[2];
-
-    //OffscreenBuffer splashscreenBitmap;
 
     CoroutineContext *splashscreenCoro;
     CoroutineContext *winCoro;

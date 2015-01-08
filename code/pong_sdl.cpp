@@ -1,4 +1,4 @@
-    #include "pong.h"
+#include "pong.h"
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -41,66 +41,62 @@ struct SDLState
     GameMemory gameMemory;
 };
 
-PLATFORM_RANDOM_NUMBER(SDLRandomNumber)
+DEBUG_PLATFORM_RANDOM_NUMBER(SDLRandomNumber)
 {
     return SDLTest_RandomInt(globalRandomContext);
 }
 
-PLATFORM_LOAD_BMP(SDLLoadBMP)
+DEBUG_PLATFORM_FREE_FILE_MEMORY(DEBUGPlatformFreeFileMemory)
 {
-    SDL_Surface *image = SDL_LoadBMP(filename);
-    if (image)
+    if (memory)
     {
-        OffscreenBuffer dest =
+        free(memory);
+    }
+}
+
+DEBUG_PLATFORM_READ_ENTIRE_FILE(DEBUGPlatFormReadEntireFile)
+{
+    DEBUGReadFileResult result = {};
+
+    int fd = open(filename, O_RDONLY);
+    if (fd != -1)
+    {
+        struct stat fileStat;
+        if (fstat(fd, &fileStat) == 0)
         {
-            .bytesPerPixel = BYTES_PER_PIXEL,
-            .width = image->w,
-            .height = image->h,
-            .pitch = image->w * BYTES_PER_PIXEL,
-            .memory = bitmapMemory,
-        };
-
-        if (image->pixels)
-        {
-            uint8 *srcRow = (uint8 *)image->pixels;
-            uint8 *destRow = (uint8 *)dest.memory;
-
-            const int srcPixelStride = image->pitch / image->w;
-            /*Assert(srcPixelStride == 3);*/
-            Assert(srcPixelStride <= BYTES_PER_PIXEL);
-
-            for (int y = 0; y < image->h; ++y)
+            uint32 fileSize32 = fileStat.st_size;
+            result.contents = (char *)malloc(fileSize32);
+            if (result.contents)
             {
-                uint8 *srcPixel = (uint8 *)srcRow;
-                uint32 *destPixel = (uint32 *)destRow;
-                for (int x = 0; x < image->w; ++x)
+                ssize_t bytesRead;
+                bytesRead = read(fd, result.contents, fileSize32);
+                if (bytesRead == fileSize32) // should have read entire file
                 {
-                    /*int red = *srcPixel++;
-                    int green = *srcPixel++;
-                    int blue = *srcPixel++;
-
-                    uint32 pixel = ((red << 16) | (green << 8) | (blue));
-                    *destPixel++ = pixel;*/
-                    *destPixel++ = *(uint32 *)srcPixel;
-                    srcPixel += srcPixelStride;
+                    result.size = fileSize32;
                 }
-
-                srcRow += image->pitch;
-                destRow += dest.pitch;
+                else
+                {
+                    DEBUGPlatformFreeFileMemory(result.contents);
+                    result.contents = 0;
+                }
+            }
+            else
+            {
+                // TODO logging
             }
         }
+        else
+        {
+            // TODO logging
+        }
 
-        SDL_FreeSurface(image);
-
-        return dest;
+         close(fd);
     }
     else
     {
         // TODO logging
     }
-
-    OffscreenBuffer empty = {};
-    return empty;
+    return result;
 }
 
 internal time_t SDLGetLastWriteTime(const char *filename)
@@ -144,8 +140,8 @@ internal void SDLGetGameCodePath(SDLGameCode *gameCode)
         *s = *t;
     }
 
-    /*printf("exe path: %s\n", gameCode->exePath);
-    printf("dll path: %s\n", gameCode->dllPath);*/
+    //printf("exe path: %s\n", gameCode->exePath);
+    //printf("dll path: %s\n", gameCode->dllPath);
 }
 
 internal void SDLLoadGameCode(const char *dllName, SDLGameCode *gameCode)
@@ -340,21 +336,6 @@ int main(int argc, char **argv)
                                                            SDL_TEXTUREACCESS_STREAMING,
                                                            GAME_WIDTH,
                                                            GAME_HEIGHT);
-
-            // FIXME without this fake bmp load and texture assign,
-            // subsequent loading of images fails when trying to access
-            // bitmap pixels
-            {
-                SDL_Surface *image;
-                SDL_Texture *imageTexture;
-                image = SDL_LoadBMP("../data/drul.bmp");
-                if (image)
-                {
-                    imageTexture = SDL_CreateTextureFromSurface(renderer, image);
-                    SDL_FreeSurface(image);
-                }
-            }
-
             OffscreenBuffer buffer =
             {
                 .bytesPerPixel = BYTES_PER_PIXEL,
@@ -376,8 +357,9 @@ int main(int argc, char **argv)
                     .isInitialized = false,
                     .permanentStorageSize = permanentStorageSize,
                     .permanentStorage = malloc(permanentStorageSize),
-                    .PlatformRandomNumber = SDLRandomNumber,
-                    .PlatformLoadBMP = SDLLoadBMP,
+                    .DEBUGPlatformRandomNumber = SDLRandomNumber,
+                    .DEBUGPlatformFreeFileMemory = DEBUGPlatformFreeFileMemory,
+                    .DEBUGPlatFormReadEntireFile = DEBUGPlatFormReadEntireFile,
                 },
             };
 
@@ -533,8 +515,6 @@ int main(int argc, char **argv)
                         state.gameCode.UpdateAndRender(&state.gameMemory, &input, 1.0f / 60.0f, &buffer);
                     }
                     SDLUpdateWindow(&buffer, renderer, texture);
-                    /*SDL_RenderCopy(renderer, imageTexture, 0, 0);
-                    SDL_RenderPresent(renderer);*/
 
                     // TODO proper defined number of players
                     // TODO check that this doesn't break input recording/playback

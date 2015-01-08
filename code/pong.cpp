@@ -254,8 +254,7 @@ internal void ResetBall(BallState *ball, const float x, const float y)
 {
         ball->radius     = 7.0f;
         ball->position.x = GAME_WIDTH * 0.5f;
-        //ball->position.x = 100.0f;
-        ball->position.y = GAME_HUD_HEIGHT + GAME_PLAY_HEIGHT * 0.5f;// + 120.0f;
+        ball->position.y = GAME_HUD_HEIGHT + GAME_PLAY_HEIGHT * 0.5f;
         ball->speed      = 100.0f; // pixels per second
         ball->velocity.x = x;
         ball->velocity.y = y;
@@ -272,8 +271,8 @@ internal void ResetPaddle(PaddleState *paddle, float x)
 internal void ResetGameSession(GameMemory *memory, GameState *gameState)
 {
     ResetBall(&gameState->ball,
-              memory->PlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f,
-              memory->PlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f);
+              memory->DEBUGPlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f,
+              memory->DEBUGPlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f);
 
     ResetPaddle(&gameState->paddle[0], 20.0f);
     ResetPaddle(&gameState->paddle[1], GAME_WIDTH - 20.0f);
@@ -396,6 +395,7 @@ internal bool CollideBallWithPaddle(GameState *gameState,
                 resetBall = true;
             }
             // TODO FIXME juicing the ball and paddle sizes breaks this edge bouncing in certain cases
+            /*
             else if (overlapPaddleTop &&
                      //ball->velocity.y > 0.0f &&
                      newPos->y < paddle->position.y)
@@ -423,6 +423,7 @@ internal bool CollideBallWithPaddle(GameState *gameState,
                     ball->bounceCoro = GetFreeCoroutine(gameState);
                 }
             }
+            */
         }
     }
 
@@ -538,23 +539,81 @@ void *PushSize_(MemoryZone *zone, memory_index size)
     return result;
 }
 
-internal OffscreenBuffer *LoadBitmap(GameMemory *memory, GameState *state, const char *filename)
+#pragma pack(push, 1)
+struct BitmapHeader
 {
-    OffscreenBuffer *bmp = &state->bitmaps[state->nextBmp++];
-    Assert(state->nextBmp < ArrayCount(state->bitmaps));
+    uint16 fileType;
+    uint32 fileSize;
+    uint16 reserved1;
+    uint16 reserved2;
+    uint32 bitmapOffset;
+    uint32 size;
+    int32 width;
+    int32 height;
+    uint16 planes;
+    uint16 bitsPerPixel;
+    uint32 compression;
+    uint32 sizeOfBitmap;
+    int32 horzResolution;
+    int32 vertResolution;
+    uint32 colorsUsed;
+    uint32 colorsImportant;
 
-    *bmp = memory->PlatformLoadBMP(filename, state->bitmapsZone.base + state->bitmapsZone.used);
-    if (bmp->width && bmp->height)
+    uint32 redMask;
+    uint32 greenMask;
+    uint32 blueMask;
+};
+#pragma pack(pop)
+
+internal OffscreenBuffer *LoadBitmap(GameMemory *memory, GameState *state, char *filename)
+{
+    DEBUGReadFileResult bmpFile = memory->DEBUGPlatFormReadEntireFile(filename);
+    Assert(bmpFile.contents && bmpFile.size);
+
+    BitmapHeader *header = (BitmapHeader *)bmpFile.contents;
+
+    uint16 fileType;
+    char *ft = (char *)(&fileType);
+    ft[0] = 'B';
+    ft[1] = 'M';
+    Assert(header->fileType == fileType && header->bitsPerPixel == 24 && header->compression == 0);
+
+    uint8 *pixels = (uint8 *)bmpFile.contents + header->bitmapOffset;
+    int srcPitch = header->width * (header->bitsPerPixel / 8);
+
+    OffscreenBuffer bmp = {};
+    bmp.bytesPerPixel = BYTES_PER_PIXEL;
+    bmp.width = header->width;
+    bmp.height = header->height;
+    bmp.pitch = header->width * BYTES_PER_PIXEL;
+    bmp.memory = PushSize_(&state->bitmapsZone, bmp.width * bmp.height * BYTES_PER_PIXEL);
+
+    uint8 *srcRow = (uint8 *)pixels;
+    uint8 *destRow = (uint8 *)bmp.memory + (bmp.height - 1) * bmp.pitch;
+
+    for (int y = 0; y < bmp.height; ++y)
     {
-        PushSize_(&state->bitmapsZone, bmp->width * bmp->height * BYTES_PER_PIXEL);
-        return bmp;
+        uint8 *srcPixelElement = (uint8 *)srcRow;
+        uint32 *destPixel = (uint32 *)destRow;
+        for (int x = 0; x < bmp.width; ++x)
+        {
+            uint8 blue = *srcPixelElement++;
+            uint8 green = *srcPixelElement++;
+            uint8 red = *srcPixelElement++;
+
+            uint32 pixel = ((red << 16) | (green << 8) | (blue));
+            *destPixel++ = pixel;
+        }
+        srcRow += srcPitch;
+        destRow -= bmp.pitch;
     }
-    else
-    {
-        Assert(bmp->width && bmp->height);
-        // TODO logging
-        return 0;
-    }
+
+    memory->DEBUGPlatformFreeFileMemory(bmpFile.contents);
+
+    OffscreenBuffer *result = &state->bitmaps[state->nextBmp++];
+    Assert(state->nextBmp < ArrayCount(state->bitmaps));
+    *result = bmp;
+    return result;
 }
 
 extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
@@ -565,7 +624,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
     if (!memory->isInitialized)
     {
-        gameState->mode = Game;
+        gameState->mode = Splash;
 
         ResetGameSession(memory, gameState);
 
@@ -602,7 +661,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                                 gameState->splashscreenBitmap,
                                 buffer);
                 if (!gameState->splashscreenCoro->jmp)
-                {   // coro is over
+                {   //    coro is over
                     gameState->splashscreenCoro = 0;
                     gameState->mode = Titles;
                 }
@@ -620,7 +679,6 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             {
                 Blit(0, 300, 1.0f, gameState->promptBitmap, buffer);
             }
-            //DrawLineHorz(0.0f, GAME_WIDTH, GAME_HUD_HEIGHT, 1.0f, 1.0f, 1.0f, buffer);
         } break;
         case Game:
         {
@@ -697,7 +755,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                     didReset = true;
                     ResetBall(ball,
                               -1.0f,
-                              memory->PlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f);
+                              memory->DEBUGPlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f);
                     gameState->scores[1]++;
                 }
             }
@@ -736,7 +794,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                     didReset = true;
                     ResetBall(ball,
                               1.0f,
-                              memory->PlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f);
+                              memory->DEBUGPlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f);
                     gameState->scores[0]++;
                 }
             }
@@ -762,7 +820,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
             if (gameState->scores[0] == WIN_SCORE || gameState->scores[1] == WIN_SCORE)
             {
-                //gameState->mode = WinScreen;
+                gameState->mode = WinScreen;
             }
 
             // Draw HUD
