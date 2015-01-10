@@ -90,7 +90,7 @@ DEBUG_PLATFORM_READ_ENTIRE_FILE(DEBUGPlatFormReadEntireFile)
             // TODO logging
         }
 
-         close(fd);
+        close(fd);
     }
     else
     {
@@ -293,7 +293,7 @@ int main(int argc, char **argv)
     SDLTest_RandomInitTime(globalRandomContext);
 
     // TODO _INIT_EVERYTHING is much slower than _INIT_VIDEO
-    SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK);
+    SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK | SDL_INIT_AUDIO);
 
     // TODO handle >2 joysticks, and arbitrary mapping to player inputs
     GameInput input = {};
@@ -320,17 +320,56 @@ int main(int argc, char **argv)
                                                 //SDL_WINDOWPOS_UNDEFINED,
                                                 GAME_WIDTH,
                                                 GAME_HEIGHT,
-                                                //SDL_WINDOW_FULLSCREEN);
                                                 0);
+                                                //SDL_WINDOW_FULLSCREEN);
     if (window)
     {
+        // AUDIO //
+        {
+            const int samplesPerSecond = 48000;
+            const int toneHz = 256;
+            const int16 toneVolume = 3000;
+            const int wavePeriod = samplesPerSecond / toneHz;
+            const int halfWavePeriod = wavePeriod / 2;
+            const int bytesPerSample = sizeof(int16) * 2;
+
+            const int bufferSize = samplesPerSecond * 5; // 5 seconds to test
+            SDL_AudioSpec audioSettings =
+            {
+                .freq = samplesPerSecond,
+                .format = AUDIO_S16,
+                .channels = 2,
+                .samples = bufferSize / 2,
+                .callback = 0,
+            };
+
+            SDL_OpenAudio(&audioSettings, 0);
+
+            const int bytesToWrite = bufferSize * bytesPerSample;
+            void *const soundBuffer = malloc(bytesToWrite);
+            const int sampleCount = bytesToWrite / bytesPerSample;
+
+            uint32 runningSampleIndex = 0;
+            int16 *sampleOut = (int16 *)soundBuffer;
+
+            for (int sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex)
+            {
+                const int16 sampleValue = ((runningSampleIndex++ / halfWavePeriod) % 2) ? toneVolume : -toneVolume;
+                *sampleOut++ = sampleValue;
+                *sampleOut++ = sampleValue;
+            }
+
+            SDL_QueueAudio(1, soundBuffer, bytesToWrite);
+            free(soundBuffer);
+
+            SDL_PauseAudio(0);
+        }
+
         SDL_Renderer *const renderer = SDL_CreateRenderer(window,
                                                           -1,
                                                           SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
         if (renderer)
         {
-            globalIsRunning = true;
-
             SDL_Texture *const texture = SDL_CreateTexture(renderer,
                                                            SDL_PIXELFORMAT_ARGB8888,
                                                            SDL_TEXTUREACCESS_STREAMING,
@@ -369,6 +408,7 @@ int main(int argc, char **argv)
 
                 SDLLoadGameCode(state.gameCode.dllPath, &state.gameCode);
 
+                globalIsRunning = true;
                 while(globalIsRunning)
                 {
                     const time_t newDLLWriteTime = SDLGetLastWriteTime(state.gameCode.dllPath);
@@ -546,6 +586,7 @@ int main(int argc, char **argv)
         }
     }
 
+    SDL_CloseAudio();
     SDL_Quit();
     return 0;
 }
