@@ -56,6 +56,13 @@ struct OffscreenBuffer
     void *memory;
 };
 
+struct GameSoundOutputBuffer
+{
+    int samplesPerSecond;
+    int sampleCount;
+    int16 *samples;
+};
+
 #define DEBUG_PLATFORM_RANDOM_NUMBER(name) int name()
 typedef DEBUG_PLATFORM_RANDOM_NUMBER(debug_platform_random_number);
 
@@ -174,6 +181,8 @@ struct MemoryZone
 
 struct GameState
 {
+    float audio_tSine;
+
     GameMode mode;
 
     GameTime time;
@@ -196,7 +205,7 @@ struct GameState
     OffscreenBuffer *winnerBitmap;
 };
 
-#define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory, GameInput *input, float dt, OffscreenBuffer *buffer)
+#define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory, GameInput *input, float dt, OffscreenBuffer *buffer, GameSoundOutputBuffer *soundBuffer)
 typedef GAME_UPDATE_AND_RENDER(game_update_and_render);
 
 

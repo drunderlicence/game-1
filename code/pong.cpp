@@ -1,6 +1,28 @@
 #include "pong.h"
 #include "math.h"
 
+internal void GameOutputSound(GameState *state, GameSoundOutputBuffer *soundBuffer)
+{
+    int toneHz = 256;
+    int16 toneVolume = 3000;
+    int wavePeriod = soundBuffer->samplesPerSecond / toneHz;
+
+    int16 *sampleOut = soundBuffer->samples;
+    for (int i = 0; i < soundBuffer->sampleCount; ++i)
+    {
+        float sineValue = sinf(state->audio_tSine);
+        int16 sampleValue = (int16)(sineValue * toneVolume);
+        *sampleOut++ = sampleValue;
+        *sampleOut++ = sampleValue;
+
+        state->audio_tSine += 6.283185307f * (1.0f / wavePeriod);
+        if (state->audio_tSine > 6.283185307f)
+        {
+            state->audio_tSine -= 6.283185307f;
+        }
+    }
+}
+
 inline int RoundFloatToInt(float real)
 {
     // TODO find intrinsic?
@@ -642,10 +664,14 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 {
     Assert(sizeof(GameState) <= memory->permanentStorageSize);
 
+
     GameState *gameState = (GameState *)memory->permanentStorage;
 
     if (!memory->isInitialized)
     {
+        // TODO kill
+        gameState->audio_tSine = 0.0f;
+
         gameState->mode = Game;
 
         ResetGameSession(memory, gameState);
@@ -667,6 +693,9 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
         memory->isInitialized = true;
     }
+
+    // TODO break out
+    GameOutputSound(gameState, soundBuffer);
 
     // Clear screen
     DrawRect(0, 0, GAME_WIDTH, GAME_HEIGHT, 0.0f, 0.0f, 0.0f, buffer);

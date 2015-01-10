@@ -352,8 +352,13 @@ struct SDLSoundOutput
     int latencySampleCount;
 };
 
-internal void sdlFillSoundBuffer(SDLSoundOutput *soundOutput, int byteToLock, int bytesToWrite)
+internal void sdlFillSoundBuffer(SDLSoundOutput *soundOutput,
+                                 int byteToLock,
+                                 int bytesToWrite,
+                                 GameSoundOutputBuffer *soundBuffer)
 {
+    int16 *samples = soundBuffer->samples;
+
     void *region1 = (uint8 *)globalAudioRingBuffer.data + byteToLock;
     int region1Size = bytesToWrite;
     if (region1Size + byteToLock > soundOutput->audioBufferSize)
@@ -367,16 +372,8 @@ internal void sdlFillSoundBuffer(SDLSoundOutput *soundOutput, int byteToLock, in
     int16 *sampleOut = (int16 *)region1;
     for (int i = 0; i < region1SampleCount; ++i)
     {
-        float sineValue = sinf(soundOutput->tSine);
-        int16 sampleValue = (int16)(sineValue * soundOutput->toneVolume);
-        *sampleOut++ = sampleValue;
-        *sampleOut++ = sampleValue;
-
-        soundOutput->tSine += 6.283185307f * (1.0f / soundOutput->wavePeriod);
-        if (soundOutput->tSine > 6.283185307f)
-        {
-            soundOutput->tSine -= 6.283185307f;
-        }
+        *sampleOut++ = *samples++;
+        *sampleOut++ = *samples++;
         ++soundOutput->runningSampleIndex;
     }
 
@@ -384,16 +381,8 @@ internal void sdlFillSoundBuffer(SDLSoundOutput *soundOutput, int byteToLock, in
     sampleOut = (int16 *)region2;
     for (int i = 0; i < region2SampleCount; ++i)
     {
-        float sineValue = sinf(soundOutput->tSine);
-        int16 sampleValue = (int16)(sineValue * soundOutput->toneVolume);
-        *sampleOut++ = sampleValue;
-        *sampleOut++ = sampleValue;
-
-        soundOutput->tSine += 6.283185307f * (1.0f / soundOutput->wavePeriod);
-        if (soundOutput->tSine > 6.283185307f)
-        {
-            soundOutput->tSine -= 6.283185307f;
-        }
+        *sampleOut++ = *samples++;
+        *sampleOut++ = *samples++;
         ++soundOutput->runningSampleIndex;
     }
 }
@@ -447,11 +436,12 @@ int main(int argc, char **argv)
         soundOutput.audioBufferSize = soundOutput.samplesPerSecond * soundOutput.bytesPerSample;
         soundOutput.tSine = 0.0f;
         soundOutput.latencySampleCount = soundOutput.samplesPerSecond / 15;
-        {
-            sdlInitAudio(soundOutput.samplesPerSecond, soundOutput.audioBufferSize);
-            sdlFillSoundBuffer(&soundOutput, 0, soundOutput.latencySampleCount * soundOutput.bytesPerSample);
-            SDL_PauseAudio(0);
-        }
+
+        int16 *soundSamples = (int16 *)calloc(soundOutput.samplesPerSecond, soundOutput.bytesPerSample);
+
+        sdlInitAudio(soundOutput.samplesPerSecond, soundOutput.audioBufferSize);
+        SDL_PauseAudio(0);
+        // ----- //
 
         SDL_Renderer *const renderer = SDL_CreateRenderer(window,
                                                           -1,
@@ -637,32 +627,42 @@ int main(int argc, char **argv)
                         SDLPlaybackInput(&state, &input);
                     }
 
+                    // AUDIO //
+                    SDL_LockAudio();
+                    int byteToLock =
+                        (soundOutput.runningSampleIndex * soundOutput.bytesPerSample) % soundOutput.audioBufferSize;
+                    int targetCursor = ((globalAudioRingBuffer.playCursor +
+                                         (soundOutput.latencySampleCount * soundOutput.bytesPerSample)) %
+                                        soundOutput.audioBufferSize);
+                    int bytesToWrite;
+                    if (byteToLock > targetCursor)
+                    {
+                        bytesToWrite = (soundOutput.audioBufferSize - byteToLock);
+                    }
+                    else
+                    {
+                        bytesToWrite = targetCursor - byteToLock;
+                    }
+                    SDL_UnlockAudio();
+
+                    GameSoundOutputBuffer soundBuffer =
+                    {
+                        .samplesPerSecond = soundOutput.samplesPerSecond,
+                        .sampleCount = bytesToWrite / soundOutput.bytesPerSample,
+                        .samples = soundSamples,
+                    };
+                    // ----- //
+
+
                     if (state.gameCode.UpdateAndRender)
                     {
                         // TODO proper frame timings
-                        state.gameCode.UpdateAndRender(&state.gameMemory, &input, 1.0f / 60.0f, &buffer);
+                        state.gameCode.UpdateAndRender(&state.gameMemory, &input, 1.0f / 60.0f, &buffer, &soundBuffer);
                     }
 
                     // AUDIO //
-                    {
-                        SDL_LockAudio();
-                        int byteToLock =
-                            (soundOutput.runningSampleIndex * soundOutput.bytesPerSample) % soundOutput.audioBufferSize;
-                        int targetCursor = ((globalAudioRingBuffer.playCursor +
-                                             (soundOutput.latencySampleCount * soundOutput.bytesPerSample)) %
-                                            soundOutput.audioBufferSize);
-                        int bytesToWrite;
-                        if (byteToLock > targetCursor)
-                        {
-                            bytesToWrite = (soundOutput.audioBufferSize - byteToLock);
-                        }
-                        else
-                        {
-                            bytesToWrite = targetCursor - byteToLock;
-                        }
-                        SDL_UnlockAudio();
-                        sdlFillSoundBuffer(&soundOutput, byteToLock, bytesToWrite);
-                    }
+                    sdlFillSoundBuffer(&soundOutput, byteToLock, bytesToWrite, &soundBuffer);
+                    // ----- //
 
                     SDLUpdateWindow(&buffer, renderer, texture);
 
