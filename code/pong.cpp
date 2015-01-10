@@ -286,6 +286,13 @@ inline float lerp(float a, float b, float t)
     return (1.0f - t) * a + t * b;
 }
 
+inline float smooth(float a, float b, float smooth)
+{
+    Assert(smooth <= 1.0f && smooth >= 0.0f);
+    float result = a + (b - a) * smooth;
+    return result;
+}
+
 internal void UpdatePaddle(PaddleState *const paddle,
                            GamePlayerInput *const playerInput,
                            const float dt)
@@ -474,6 +481,7 @@ internal void SplashCoroutine(CoroutineContext *context,
     CORO_END;
 }
 
+
 internal void BounceSizeCoroutine(CoroutineContext *context,
                                   GameTime *time,
                                   float timeSpan,
@@ -482,16 +490,30 @@ internal void BounceSizeCoroutine(CoroutineContext *context,
 {
     CORO_STACK(float t0;
                float a0;
+               float a1;
                );
+    float t;
+    float ease;
+    //const float smoothing = 0.1f;
 
     CORO_BEGIN;
 
     stack->t0 = time->seconds;
     stack->a0 = *a;
+    stack->a1 = *a * bounceScale;
 
     while (time->seconds - stack->t0 <= timeSpan)
     {
-        *a = stack->a0 * bounceScale;
+        t = (time->seconds - stack->t0) / timeSpan;
+        if ( t < 0.5f)
+        {
+            ease = lerp(stack->a0, stack->a1, 2.0f*t);
+        }
+        else
+        {
+            ease = lerp(stack->a1, stack->a0, 2.0f*(t - 0.5f));
+        }
+        *a = ease;
         YIELD( );
     }
 
@@ -624,7 +646,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
     if (!memory->isInitialized)
     {
-        gameState->mode = Splash;
+        gameState->mode = Game;
 
         ResetGameSession(memory, gameState);
 
@@ -810,7 +832,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                 BounceSizeCoroutine(ball->bounceCoro,
                                     &gameState->time,
                                     0.1f,
-                                    1.5f,
+                                    2.0f,
                                     &ball->radius);
                 if (!ball->bounceCoro->jmp)
                 {   // coro is over
