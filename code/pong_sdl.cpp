@@ -342,13 +342,9 @@ internal void sdlInitAudio(int32 samplesPerSecond, int32 bufferSize)
 struct SDLSoundOutput
 {
     int samplesPerSecond;
-    int toneHz;
-    int16 toneVolume;
     uint32 runningSampleIndex;
-    int wavePeriod;
     int bytesPerSample;
     int audioBufferSize;
-    real32 tSine;
     int latencySampleCount;
 };
 
@@ -428,13 +424,9 @@ int main(int argc, char **argv)
         // AUDIO //
         SDLSoundOutput soundOutput = {};
         soundOutput.samplesPerSecond = 48000;
-        soundOutput.toneHz = 256;
-        soundOutput.toneVolume = 3000;
         soundOutput.runningSampleIndex = 0;
-        soundOutput.wavePeriod = soundOutput.samplesPerSecond / soundOutput.toneHz;
         soundOutput.bytesPerSample = sizeof(int16) * 2;
         soundOutput.audioBufferSize = soundOutput.samplesPerSecond * soundOutput.bytesPerSample;
-        soundOutput.tSine = 0.0f;
         soundOutput.latencySampleCount = soundOutput.samplesPerSecond / 15;
 
         int16 *soundSamples = (int16 *)calloc(soundOutput.samplesPerSecond, soundOutput.bytesPerSample);
@@ -649,6 +641,7 @@ int main(int argc, char **argv)
                     {
                         .samplesPerSecond = soundOutput.samplesPerSecond,
                         .sampleCount = bytesToWrite / soundOutput.bytesPerSample,
+                        .runningSampleIndex = soundOutput.runningSampleIndex,
                         .samples = soundSamples,
                     };
                     // ----- //

@@ -3,25 +3,14 @@
 
 internal void GameOutputSound(GameState *state, GameSoundOutputBuffer *soundBuffer)
 {
-    float paddle1 = -0.5f * (state->paddle[0].position.y / (GAME_PLAY_HEIGHT / 2.0f));
-    float paddle2 = -0.5f * (state->paddle[1].position.y / (GAME_PLAY_HEIGHT / 2.0f));
-    int toneHz = 512 + (int)(paddle1 * 192) + (int)(paddle2 * 192);
-    int16 toneVolume = 3000;
-    int wavePeriod = soundBuffer->samplesPerSecond / toneHz;
-
     int16 *sampleOut = soundBuffer->samples;
     for (int i = 0; i < soundBuffer->sampleCount; ++i)
     {
-        float sineValue = sinf(state->audio_tSine);
-        int16 sampleValue = (int16)(sineValue * toneVolume);
+        int index = (soundBuffer->runningSampleIndex + i) % ArrayCount(state->soundBuffer);
+        int16 sampleValue = state->soundBuffer[index];
         *sampleOut++ = sampleValue;
         *sampleOut++ = sampleValue;
-
-        state->audio_tSine += 6.283185307f * (1.0f / wavePeriod);
-        if (state->audio_tSine > 6.283185307f)
-        {
-            state->audio_tSine -= 6.283185307f;
-        }
+        state->soundBuffer[index] = 0;
     }
 }
 
@@ -505,8 +494,21 @@ internal void SplashCoroutine(CoroutineContext *context,
     CORO_END;
 }
 
+internal void MakeASound(GameState *state,
+                         GameMemory *memory,
+                         GameSoundOutputBuffer *sound)
+{
+    for (int i = 0; i < 48000 / 10; ++i)
+    {
+        int index = (sound->runningSampleIndex + i) % ArrayCount(state->soundBuffer);
+        state->soundBuffer[index] = (int16)(-65536 + (memory->DEBUGPlatformRandomNumber() % (2 * 65536)));
+    }
+}
 
 internal void BounceSizeCoroutine(CoroutineContext *context,
+                                  GameState *state,
+                                  GameMemory *memory,
+                                  GameSoundOutputBuffer *sound,
                                   GameTime *time,
                                   float timeSpan,
                                   float bounceScale,
@@ -525,6 +527,8 @@ internal void BounceSizeCoroutine(CoroutineContext *context,
     stack->t0 = time->seconds;
     stack->a0 = *a;
     stack->a1 = *a * bounceScale;
+
+    MakeASound(state, memory, sound);
 
     while (time->seconds - stack->t0 <= timeSpan)
     {
@@ -692,6 +696,20 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         gameState->titlesBitmap = LoadBitmap(memory, gameState, "../data/titlesScreen.bmp");
         gameState->promptBitmap = LoadBitmap(memory, gameState, "../data/pressAnyKey.bmp");
         gameState->winnerBitmap = LoadBitmap(memory, gameState, "../data/winner.bmp");
+
+        /*float t = 0.0f;
+        float period = 48000.0f / 512.0f;
+        for (int i = 0; i < ArrayCount(gameState->soundBuffer); ++i)
+        {
+            //gameState->soundBuffer[i] = (int16)(-65536 + (memory->DEBUGPlatformRandomNumber() % (2 * 65536)));
+            gameState->soundBuffer[i] =
+                (int16)(sinf(t) * 3000);
+            t += 6.283185307f * (1.0f / period);
+            if (t > 6.283185307f)
+            {
+                t -= 6.283185307f;
+            }
+        }*/
 
         memory->isInitialized = true;
     }
@@ -861,6 +879,9 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             if (ball->bounceCoro)
             {
                 BounceSizeCoroutine(ball->bounceCoro,
+                                    gameState,
+                                    memory,
+                                    soundBuffer,
                                     &gameState->time,
                                     0.1f,
                                     2.0f,

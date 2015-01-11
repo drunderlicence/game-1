@@ -60,6 +60,7 @@ struct GameSoundOutputBuffer
 {
     int samplesPerSecond;
     int sampleCount;
+    uint32 runningSampleIndex;
     int16 *samples;
 };
 
@@ -203,6 +204,10 @@ struct GameState
     OffscreenBuffer *titlesBitmap;
     OffscreenBuffer *promptBitmap;
     OffscreenBuffer *winnerBitmap;
+
+    // samples per sec * seconds * bytes per sample (single channel)
+    // NOTE just using same sample for both channels
+    int16 soundBuffer[48000 * 5 * sizeof(int16)];
 };
 
 #define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory, GameInput *input, float dt, OffscreenBuffer *buffer, GameSoundOutputBuffer *soundBuffer)
