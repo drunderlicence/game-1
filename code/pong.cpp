@@ -3,7 +3,9 @@
 
 internal void GameOutputSound(GameState *state, GameSoundOutputBuffer *soundBuffer)
 {
-    int toneHz = 256;
+    float paddle1 = -0.5f * (state->paddle[0].position.y / (GAME_PLAY_HEIGHT / 2.0f));
+    float paddle2 = -0.5f * (state->paddle[1].position.y / (GAME_PLAY_HEIGHT / 2.0f));
+    int toneHz = 512 + (int)(paddle1 * 192) + (int)(paddle2 * 192);
     int16 toneVolume = 3000;
     int wavePeriod = soundBuffer->samplesPerSecond / toneHz;
 
