@@ -489,7 +489,7 @@ internal void SplashCoroutine(CoroutineContext *context,
     while(time->seconds - stack->t0 <= fadeInTime)
     {
         nt = (time->seconds - stack->t0) / fadeInTime;
-        blend = sinf(nt * 3.141592654f);
+        blend = sinf(nt * PI);
 #if 0
         printf("T: %f, blend: %f\n", nt, blend);
 #endif
@@ -512,16 +512,74 @@ internal void MakeASound(GameState *state,
                          GameSoundOutputBuffer *sound)
 {
     float t = 0.0f;
-    float period = 48000.0f / 512.0f;
+    float period = 48000.0f / 1024.0f;
     for (int i = 0; i < 48000 / 2; ++i)
     {
         int index = (sound->runningSampleIndex + i) % ArrayCount(state->soundBuffer);
         state->soundBuffer[index] += (int16)(sinf(t) * 3000);
-        t += 6.283185307f * (1.0f / period);
-        if (t > 6.283185307f)
+        t += TWOPI * (1.0f / period);
+        if (t > TWOPI)
         {
-            t -= 6.283185307f;
+            t -= TWOPI;
         }
+    }
+}
+
+internal void ParamSine(GameState *state,
+                        GameMemory *memory,
+                        GameSoundOutputBuffer *sound)
+{
+    float t = 0.0f;
+    float frequency_kHz = 10.6f;
+    float length_Seconds = 0.5f;
+    Assert(length_Seconds <= SOUND_BUFFER_LENGTH_IN_SECONDS);
+    float volume = 3000.0f;
+
+    int sampleCount = (int)((float)SAMPLE_HZ * length_Seconds);
+    for (int i = 0; i < sampleCount; ++i)
+    {
+        int index = (sound->runningSampleIndex + i) % ArrayCount(state->soundBuffer);
+        state->soundBuffer[index] += (int16)(sinf(t) * volume);
+
+        volume *= 0.9999f;
+
+        t += TWOPI * (frequency_kHz / 1000.0f);
+        while (t > TWOPI)
+        {
+            t -= TWOPI;
+        }
+    }
+}
+
+internal void ParamSquare(GameState *state,
+                          GameMemory *memory,
+                          GameSoundOutputBuffer *sound)
+{
+    float frequency = 140.0f;
+    float period_speed = frequency / (float)SAMPLE_HZ;
+    float period_position = 0.0f;
+
+    float length_Seconds = 0.15f;
+    Assert(length_Seconds <= SOUND_BUFFER_LENGTH_IN_SECONDS);
+    float volume = 2500.0f;
+
+    int sampleCount = (int)((float)SAMPLE_HZ * length_Seconds);
+    for (int i = 0; i < sampleCount; ++i)
+    {
+        period_position += period_speed;
+        while (period_position >= 1.0f)
+        {
+            period_position -= 1.0f;
+        }
+
+        int16 sample = (int16)(period_position < 0.4f ? -volume : volume);
+
+        //frequency += 0.05f;
+        frequency *= 1.00008f;
+        period_speed = frequency / (float)SAMPLE_HZ;
+
+        int index = (sound->runningSampleIndex + i) % ArrayCount(state->soundBuffer);
+        state->soundBuffer[index] += sample;
     }
 }
 
@@ -547,7 +605,7 @@ internal void BounceSizeCoroutine(CoroutineContext *context,
     stack->a0 = *a;
     stack->a1 = *a * bounceScale;
 
-    MakeASound(state, memory, sound);
+    ParamSquare(state, memory, sound);
 
     while (time->seconds - stack->t0 <= timeSpan)
     {

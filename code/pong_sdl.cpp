@@ -410,7 +410,9 @@ int main(int argc, char **argv)
         }
     }
 
+#if 0
     SDL_SetRelativeMouseMode(SDL_TRUE);
+#endif
 
     SDL_Window *const window = SDL_CreateWindow("Pong",
                                                 // TODO make window start in center with WINDOW_POS
@@ -432,11 +434,11 @@ int main(int argc, char **argv)
     {
         // AUDIO //
         SDLSoundOutput soundOutput = {};
-        soundOutput.samplesPerSecond = 48000;
+        soundOutput.samplesPerSecond = SAMPLE_HZ;
         soundOutput.runningSampleIndex = 0;
         soundOutput.bytesPerSample = sizeof(int16) * 2;
         soundOutput.audioBufferSize = soundOutput.samplesPerSecond * soundOutput.bytesPerSample;
-        soundOutput.latencySampleCount = soundOutput.samplesPerSecond / 15;
+        soundOutput.latencySampleCount = soundOutput.samplesPerSecond / SOUND_LATENCY;
 
         int16 *soundSamples = (int16 *)calloc(soundOutput.samplesPerSecond, soundOutput.bytesPerSample);
 

@@ -24,6 +24,9 @@ typedef double real64;
 
 typedef size_t memory_index;
 
+#define PI    3.141592654f
+#define TWOPI 6.283185307f
+
 #if PONG_SLOW
 #define Assert(condition) if (!(condition)) {*(int *)0 = 0;}
 #else
@@ -43,6 +46,10 @@ typedef size_t memory_index;
 #define GAME_HUD_HEIGHT 80
 #define GAME_PLAY_HEIGHT (GAME_HEIGHT - GAME_HUD_HEIGHT)
 #define WIN_SCORE 3
+
+#define SAMPLE_HZ 48000
+#define SOUND_LATENCY 15
+#define SOUND_BUFFER_LENGTH_IN_SECONDS 10
 
 #include "big_numbers.h"
 #include "coroutines.h"
@@ -207,7 +214,7 @@ struct GameState
 
     // samples per sec * seconds * bytes per sample (single channel)
     // NOTE just using same sample for both channels
-    int16 soundBuffer[48000 * 10 * sizeof(int16)];
+    int16 soundBuffer[SAMPLE_HZ * SOUND_BUFFER_LENGTH_IN_SECONDS * sizeof(int16)];
 };
 
 #define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory, GameInput *input, float dt, OffscreenBuffer *buffer, GameSoundOutputBuffer *soundBuffer)
