@@ -590,11 +590,40 @@ internal void BounceSizeCoroutine(CoroutineContext *context,
     CORO_END;
 }
 
+internal void ResetCoroutine(CoroutineContext *context,
+                             GameTime *time,
+                             GameState *state,
+                             GameMemory *memory,
+                             float resetTime,
+                             int scorer)
+{
+    CORO_STACK(float t0;
+               int scorer;);
+
+    CORO_BEGIN;
+
+    stack->t0 = time->seconds;
+    stack->scorer = scorer;
+
+    state->ball.radius = 0.0f;
+
+    while(time->seconds - stack->t0 <= resetTime)
+    {
+        YIELD( );
+    }
+
+    ResetBall(&state->ball,
+              1.0f,
+              memory->DEBUGPlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f);
+    state->scores[stack->scorer]++;
+
+    CORO_END;
+}
+
 internal void WinCoroutine(CoroutineContext *context,
                            GameTime *time,
                            float winTime,
-                           GameInput *input,
-                           OffscreenBuffer *backbuffer)
+                           GameInput *input)
 {
     CORO_STACK(float t0;
                );
@@ -779,140 +808,184 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             UpdatePaddle(&gameState->paddle[0], &input->player[0], dt);
             UpdatePaddle(&gameState->paddle[1], &input->player[1], dt);
 
-            // Update ball
             BallState *const ball = &gameState->ball;
-            Vector2 newPos;
-            newPos.x = ball->position.x + ball->velocity.x * ball->speed * dt;
-            newPos.y = ball->position.y + ball->velocity.y * ball->speed * dt;
 
-            // Collide ball
-            if (newPos.y - ball->radius < GAME_HUD_HEIGHT && ball->velocity.y < 0.0f)
+            // Ball isn't resetting
+            if (!gameState->resetCoro)
             {
-                ball->velocity.y = 1.0f;
-                ball->speed *= 1.1f;
-                newPos.y = GAME_HUD_HEIGHT + ball->radius;
+                // Update ball
+                Vector2 newPos;
+                newPos.x = ball->position.x + ball->velocity.x * ball->speed * dt;
+                newPos.y = ball->position.y + ball->velocity.y * ball->speed * dt;
 
-                if (!ball->bounceCoro) // don't do bounce effect if one is already playing
+                // Collide ball
+                if (newPos.y - ball->radius < GAME_HUD_HEIGHT && ball->velocity.y < 0.0f)
                 {
-                    ball->bounceCoro = GetFreeCoroutine(gameState);
+                    ball->velocity.y = 1.0f;
+                    ball->speed *= 1.1f;
+                    newPos.y = GAME_HUD_HEIGHT + ball->radius;
+
+                    if (!ball->bounceCoro) // don't do bounce effect if one is already playing
+                    {
+                        ball->bounceCoro = GetFreeCoroutine(gameState);
+                    }
+                }
+                else if (newPos.y + ball->radius > GAME_HEIGHT && ball->velocity.y > 0.0f)
+                {
+                    ball->velocity.y = -1.0f;
+                    ball->speed *= 1.1f;
+                    newPos.y = GAME_HEIGHT - ball->radius;
+
+                    if (!ball->bounceCoro) // don't do bounce effect if one is already playing
+                    {
+                        ball->bounceCoro = GetFreeCoroutine(gameState);
+                    }
+                }
+
+                // Collide with paddles
+                bool32 didReset = false;
+                // Player 1
+                {
+                    PaddleState *const paddle = &gameState->paddle[0];
+
+                    const float halfPaddleWidth = paddle->width * 0.5f;
+
+                    const bool32 isBeyondPaddle =
+                        newPos.x - ball->radius <= paddle->position.x + halfPaddleWidth;
+
+                    const bool32 wasBeyondPaddle =
+                        ball->position.x - ball->radius < paddle->position.x + halfPaddleWidth;
+
+                    const bool32 isMovingTowardPaddle =
+                        ball->velocity.x < 0.0f;
+
+                    const float bounceVelocityX = 1.0f;
+                    const float bouncePositionX = ball->radius + paddle->position.x + halfPaddleWidth;
+
+                    const bool32 isOutOfBounds = newPos.x + ball->radius < 0.0f;
+
+                    const bool32 shouldReset = CollideBallWithPaddle(gameState,
+                                                                     ball,
+                                                                     paddle,
+                                                                     isBeyondPaddle,
+                                                                     wasBeyondPaddle,
+                                                                     isMovingTowardPaddle,
+                                                                     bounceVelocityX,
+                                                                     bouncePositionX,
+                                                                     isOutOfBounds,
+                                                                     &newPos);
+                    if (shouldReset)
+                    {
+                        PlaySquareWave(gameState, memory, soundBuffer,
+                                       140.0f, 0.8f, 3000.0f,
+                                       0.2f, 0.9999f);
+
+                        gameState->resetCoro = GetFreeCoroutine(gameState);
+                        if (gameState->resetCoro)
+                        {
+                            ResetCoroutine(gameState->resetCoro,
+                                           &gameState->time,
+                                           gameState,
+                                           memory,
+                                           0.8f,
+                                           1);
+                        }
+                        else
+                        {
+                            Assert(false); // shouldn't happen!
+                        }
+                        didReset = true;
+                    }
+                }
+                // Player 2
+                {
+                    PaddleState *const paddle = &gameState->paddle[1];
+
+                    const float halfPaddleWidth = paddle->width * 0.5f;
+
+                    const bool32 isBeyondPaddle =
+                        newPos.x + ball->radius >= paddle->position.x - halfPaddleWidth;
+
+                    const bool32 wasBeyondPaddle =
+                        ball->position.x + ball->radius > paddle->position.x - halfPaddleWidth;
+
+                    const bool32 isMovingTowardPaddle =
+                        ball->velocity.x > 0.0f;
+
+                    const float bounceVelocityX = -1.0f;
+                    const float bouncePositionX = paddle->position.x - halfPaddleWidth - ball->radius;
+
+                    const bool32 isOutOfBounds = newPos.x - ball->radius > GAME_WIDTH;
+
+                    const bool32 shouldReset  = CollideBallWithPaddle(gameState,
+                                                                      ball,
+                                                                      paddle,
+                                                                      isBeyondPaddle,
+                                                                      wasBeyondPaddle,
+                                                                      isMovingTowardPaddle,
+                                                                      bounceVelocityX,
+                                                                      bouncePositionX,
+                                                                      isOutOfBounds,
+                                                                      &newPos);
+                    if (shouldReset)
+                    {
+                        PlaySquareWave(gameState, memory, soundBuffer,
+                                       140.0f, 0.8f, 3000.0f,
+                                       0.2f, 0.9999f);
+
+                        gameState->resetCoro = GetFreeCoroutine(gameState);
+                        if (gameState->resetCoro)
+                        {
+                            ResetCoroutine(gameState->resetCoro,
+                                           &gameState->time,
+                                           gameState,
+                                           memory,
+                                           0.8f,
+                                           0);
+                        }
+                        else
+                        {
+                            Assert(false); // shouldn't happen!
+                        }
+                        didReset = true;
+                    }
+                }
+
+                if (!didReset)
+                {
+                    ball->position = newPos;
+                }
+
+                // Update ball bounce coroutine, if there is one going
+                if (ball->bounceCoro)
+                {
+                    BounceSizeCoroutine(ball->bounceCoro,
+                                        gameState,
+                                        memory,
+                                        soundBuffer,
+                                        &gameState->time,
+                                        0.1f,
+                                        2.0f,
+                                        &ball->radius);
+                    if (!ball->bounceCoro->jmp)
+                    {   // coro is over
+                        ball->bounceCoro = 0;
+                    }
                 }
             }
-            else if (newPos.y + ball->radius > GAME_HEIGHT && ball->velocity.y > 0.0f)
+            // Ball is resetting
+            else
             {
-                ball->velocity.y = -1.0f;
-                ball->speed *= 1.1f;
-                newPos.y = GAME_HEIGHT - ball->radius;
-
-                if (!ball->bounceCoro) // don't do bounce effect if one is already playing
+                ResetCoroutine(gameState->resetCoro,
+                               &gameState->time,
+                               gameState,
+                               memory,
+                               0.8f,
+                               0);
+                if (!gameState->resetCoro->jmp)
                 {
-                    ball->bounceCoro = GetFreeCoroutine(gameState);
-                }
-            }
-
-            // Collide with paddles
-            bool32 didReset = false;
-            // Player 1
-            {
-                PaddleState *const paddle = &gameState->paddle[0];
-
-                const float halfPaddleWidth = paddle->width * 0.5f;
-
-                const bool32 isBeyondPaddle =
-                    newPos.x - ball->radius <= paddle->position.x + halfPaddleWidth;
-
-                const bool32 wasBeyondPaddle =
-                    ball->position.x - ball->radius < paddle->position.x + halfPaddleWidth;
-
-                const bool32 isMovingTowardPaddle =
-                    ball->velocity.x < 0.0f;
-
-                const float bounceVelocityX = 1.0f;
-                const float bouncePositionX = ball->radius + paddle->position.x + halfPaddleWidth;
-
-                const bool32 isOutOfBounds = newPos.x + ball->radius < 0.0f;
-
-                const bool32 shouldReset = CollideBallWithPaddle(gameState,
-                                                                 ball,
-                                                                 paddle,
-                                                                 isBeyondPaddle,
-                                                                 wasBeyondPaddle,
-                                                                 isMovingTowardPaddle,
-                                                                 bounceVelocityX,
-                                                                 bouncePositionX,
-                                                                 isOutOfBounds,
-                                                                 &newPos);
-                if (shouldReset)
-                {
-                    didReset = true;
-                    ResetBall(ball,
-                              -1.0f,
-                              memory->DEBUGPlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f);
-                    gameState->scores[1]++;
-
-                    PlaySquareWave(gameState, memory, soundBuffer,
-                                   140.0f, 0.8f, 3000.0f,
-                                   0.2f, 0.9999f);
-                }
-            }
-            // Player 2
-            {
-                PaddleState *const paddle = &gameState->paddle[1];
-
-                const float halfPaddleWidth = paddle->width * 0.5f;
-
-                const bool32 isBeyondPaddle =
-                    newPos.x + ball->radius >= paddle->position.x - halfPaddleWidth;
-
-                const bool32 wasBeyondPaddle =
-                    ball->position.x + ball->radius > paddle->position.x - halfPaddleWidth;
-
-                const bool32 isMovingTowardPaddle =
-                    ball->velocity.x > 0.0f;
-
-                const float bounceVelocityX = -1.0f;
-                const float bouncePositionX = paddle->position.x - halfPaddleWidth - ball->radius;
-
-                const bool32 isOutOfBounds = newPos.x - ball->radius > GAME_WIDTH;
-
-                const bool32 shouldReset  = CollideBallWithPaddle(gameState,
-                                                                  ball,
-                                                                  paddle,
-                                                                  isBeyondPaddle,
-                                                                  wasBeyondPaddle,
-                                                                  isMovingTowardPaddle,
-                                                                  bounceVelocityX,
-                                                                  bouncePositionX,
-                                                                  isOutOfBounds,
-                                                                  &newPos);
-                if (shouldReset)
-                {
-                    didReset = true;
-                    ResetBall(ball,
-                              1.0f,
-                              memory->DEBUGPlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f);
-                    gameState->scores[0]++;
-                }
-            }
-
-            if (!didReset)
-            {
-                ball->position = newPos;
-            }
-
-            // Update ball bounce coroutine, if there is one going
-            if (ball->bounceCoro)
-            {
-                BounceSizeCoroutine(ball->bounceCoro,
-                                    gameState,
-                                    memory,
-                                    soundBuffer,
-                                    &gameState->time,
-                                    0.1f,
-                                    2.0f,
-                                    &ball->radius);
-                if (!ball->bounceCoro->jmp)
-                {   // coro is over
-                    ball->bounceCoro = 0;
+                    // coro over
+                    gameState->resetCoro = 0;
                 }
             }
 
@@ -969,8 +1042,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                 WinCoroutine(gameState->winCoro,
                              &gameState->time,
                              5.0f,
-                             input,
-                             buffer);
+                             input);
                 if (!gameState->winCoro->jmp)
                 {   // coro is over
                     gameState->winCoro = 0;

@@ -410,26 +410,23 @@ int main(int argc, char **argv)
         }
     }
 
-#if 0
-    SDL_SetRelativeMouseMode(SDL_TRUE);
-#endif
 
     SDL_Window *const window = SDL_CreateWindow("Pong",
-                                                // TODO make window start in center with WINDOW_POS
-                                                // _UNDEFINED, and make fullscreen
-#if 1
+#if !defined(FULLSCREEN)
                                                 100, 100,
-#else
-                                                SDL_WINDOWPOS_UNDEFINED,
-                                                SDL_WINDOWPOS_UNDEFINED,
-                                                #endif
-#if 1
                                                 GAME_WIDTH,
                                                 GAME_HEIGHT,
                                                 0);
 #else
+                                                SDL_WINDOWPOS_UNDEFINED,
+                                                SDL_WINDOWPOS_UNDEFINED,
+                                                GAME_WIDTH,
+                                                GAME_HEIGHT,
                                                 SDL_WINDOW_FULLSCREEN);
+
+    SDL_SetRelativeMouseMode(SDL_TRUE);
 #endif
+
     if (window)
     {
         // AUDIO //

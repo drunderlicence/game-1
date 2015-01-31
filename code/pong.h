@@ -201,6 +201,7 @@ struct GameState
     int scores[2];
 
     CoroutineContext *splashscreenCoro;
+    CoroutineContext *resetCoro;
     CoroutineContext *winCoro;
     CoroutineContext coroutines[100];
 
