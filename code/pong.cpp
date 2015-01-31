@@ -744,7 +744,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
     if (!memory->isInitialized)
     {
-        gameState->mode = Game;
+        gameState->mode = Splash;
 
         ResetGameSession(memory, gameState);
 
@@ -752,16 +752,15 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                        memory->permanentStorageSize - sizeof(GameState),
                        (uint8 *)memory->permanentStorage + sizeof(GameState));
 
-        // TODO proper resource paths
-        gameState->splashscreenBitmap = LoadBitmap(memory, gameState, "../data/drul.bmp");
+        gameState->splashscreenBitmap = LoadBitmap(memory, gameState, "data/drul.bmp");
         if (gameState->splashscreenBitmap)
         {
             gameState->splashscreenCoro = GetFreeCoroutine(gameState);
         }
 
-        gameState->titlesBitmap = LoadBitmap(memory, gameState, "../data/titlesScreen.bmp");
-        gameState->promptBitmap = LoadBitmap(memory, gameState, "../data/pressAnyKey.bmp");
-        gameState->winnerBitmap = LoadBitmap(memory, gameState, "../data/winner.bmp");
+        gameState->titlesBitmap = LoadBitmap(memory, gameState, "data/titlesScreen.bmp");
+        gameState->promptBitmap = LoadBitmap(memory, gameState, "data/pressAnyKey.bmp");
+        gameState->winnerBitmap = LoadBitmap(memory, gameState, "data/winner.bmp");
 
         memory->isInitialized = true;
     }

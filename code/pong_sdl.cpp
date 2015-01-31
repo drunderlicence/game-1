@@ -10,6 +10,7 @@
 
 global_variable bool32 globalIsRunning;
 global_variable SDLTest_RandomContext *globalRandomContext;
+global_variable char *globalResourcePath;
 
 struct SDLGameCode
 {
@@ -54,11 +55,30 @@ DEBUG_PLATFORM_FREE_FILE_MEMORY(DEBUGPlatformFreeFileMemory)
     }
 }
 
+void ConcatStrings(char *a, char *b, char *dest)
+{
+    // TOOD very very bad string concat routine!!
+    while (*a)
+    {
+        *dest++ = *a++;
+    }
+    while (*b)
+    {
+        *dest++ = *b++;
+    }
+
+    *dest++ = 0;
+}
+
 DEBUG_PLATFORM_READ_ENTIRE_FILE(DEBUGPlatFormReadEntireFile)
 {
     DEBUGReadFileResult result = {};
 
-    int fd = open(filename, O_RDONLY);
+    char fullFilePath[1024];
+    ConcatStrings(globalResourcePath, filename, fullFilePath);
+    printf("%s\n", fullFilePath);
+
+    int fd = open(fullFilePath, O_RDONLY);
     if (fd != -1)
     {
         struct stat fileStat;
@@ -387,6 +407,8 @@ internal void sdlFillSoundBuffer(SDLSoundOutput *soundOutput,
 
 int main(int argc, char **argv)
 {
+    globalResourcePath = SDL_GetBasePath();
+
     SDLTest_RandomContext rc;
     globalRandomContext = &rc;
     SDLTest_RandomInitTime(globalRandomContext);
@@ -412,6 +434,7 @@ int main(int argc, char **argv)
 
 
     SDL_Window *const window = SDL_CreateWindow("Pong",
+#define FULLSCREEN
 #if !defined(FULLSCREEN)
                                                 100, 100,
                                                 GAME_WIDTH,
