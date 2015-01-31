@@ -11,32 +11,23 @@ internal void GameOutputSound(GameState *state, GameSoundOutputBuffer *soundBuff
         int16 sampleValue = state->soundBuffer[index];
         *sampleOut++ = sampleValue;
         *sampleOut++ = sampleValue;
-        //state->soundBuffer[index] = 0;
     }
+#if 0
     printf("dRSI: %d, SC: %d, diff: %d\n",
            soundBuffer->runningSampleIndex - lastRSI,
            soundBuffer->sampleCount,
            soundBuffer->sampleCount - (soundBuffer->runningSampleIndex - lastRSI));
+#endif
     for (int i = lastRSI; i < soundBuffer->runningSampleIndex; ++i)
     {
         int index = i % ArrayCount(state->soundBuffer);
         state->soundBuffer[index] = 0;
     }
     lastRSI = soundBuffer->runningSampleIndex;
-    /*for (int i = 0; i < soundBuffer->sampleCount*4; ++i)
-    {
-        int index = (soundBuffer->runningSampleIndex - 1 - i);
-        if (index < 0)
-        {
-            index %= ArrayCount(state->soundBuffer);
-            state->soundBuffer[index] = 0;
-        }
-    }*/
 }
 
 inline int RoundFloatToInt(float real)
 {
-    // TODO find intrinsic?
     return (int)(real + 0.5f);
 }
 
@@ -57,8 +48,12 @@ inline float min(float a, float b)
 
 inline float clamp(float in, float min, float max)
 {
-    //return max(min, min(max, in));
     return in > min ? (in < max ? in : max) : min;
+}
+
+inline float abs(float in)
+{
+    return in < 0.0f ? -in : in;
 }
 
 internal CoroutineContext *GetFreeCoroutine(GameState *state)
@@ -78,7 +73,7 @@ internal CoroutineContext *GetFreeCoroutine(GameState *state)
 }
 
 internal void Blit(const float destLeft, const float destTop,
-                   const float blend,
+                   float blend,
                    const OffscreenBuffer *const src,
                    OffscreenBuffer *dest)
 {
@@ -90,7 +85,8 @@ internal void Blit(const float destLeft, const float destTop,
     uint8 *srcRow = (uint8 *)src->memory;
     uint8 *destRow = (uint8 *)dest->memory + minX * dest->bytesPerPixel + minY * dest->pitch;
 
-    Assert(blend >= 0.0f && blend <= 1.0f); // TODO clamping
+    blend = clamp(blend, 0.0f, 1.0f);
+    Assert(blend >= 0.0f && blend <= 1.0f);
     const float oneMinusBlend = 1.0f - blend;
 
     for (int y = minY; y < maxY; ++y)
@@ -99,8 +95,10 @@ internal void Blit(const float destLeft, const float destTop,
         uint32 *destPixel = (uint32 *)destRow;
         for (int x = minX; x < maxX; ++x)
         {
+#if 0
             // use this for non blending
-            /**destPixel++ = *srcPixel++;*/
+            destPixel++ = *srcPixel++;
+#else
             // will it blend?
             float r =
                 (float)((*srcPixel & 0x00FF0000) >> 16) * blend +
@@ -115,6 +113,7 @@ internal void Blit(const float destLeft, const float destTop,
                             ((RoundFloatToInt(g) <<  8) & 0x0000FF00) |
                             ((RoundFloatToInt(b) <<  0) & 0x000000FF));
             srcPixel++;
+#endif
         }
 
         srcRow += src->pitch;
@@ -199,7 +198,7 @@ internal void DrawLineVert(const float top,
 
     for (int y = minY; y < maxY; ++y)
     {
-        uint32 *pixel = (uint32 *)row;
+            uint32 *pixel = (uint32 *)row;
         *pixel++ = color;
 
         row += buffer->pitch;
@@ -358,20 +357,11 @@ internal void UpdatePaddle(PaddleState *const paddle,
     paddle->position.y += (paddle->newPosition.y - paddle->position.y) * paddleSmoothing;
 
     float dy = lastY - paddle->position.y;
-    if (dy < 0.0f) // TODO abs
-    {
-        dy = -dy;
-    }
+    dy = abs(dy);
+    Assert(dy >= 0.0f);
     dy /= paddleStretchScale;
-    // TODO clamp
-    if (dy > 1.0f)
-    {
-        dy = 1.0f;
-    }
-    else if (dy < 0.0f)
-    {
-        dy = 0.0f;
-    }
+    dy = clamp(dy, 0.0f, 1.0f);
+    Assert(dy >= 0.0f && dy <= 1.0f);
     const float scale = lerp(1.0f, paddleMaxStretch, dy);
     {
         const float newHeight = paddle->restHeight * scale;
@@ -381,8 +371,9 @@ internal void UpdatePaddle(PaddleState *const paddle,
         const float newWidth = paddle->restWidth * (1.0f / scale);
         paddle->width += (newWidth - paddle->width) * paddleSpeedSmoothing;
     }
-    //printf("%f %f\n", paddle->height, paddle->width);
-    //paddle->width = paddle->restWidth * (1.0f + dy);
+#if 0
+    printf("%f %f\n", paddle->height, paddle->width);
+#endif
 
     const float halfPaddleHeight = paddle->height * 0.5f;
     if (paddle->position.y - halfPaddleHeight < GAME_HUD_HEIGHT)
@@ -435,7 +426,7 @@ internal bool CollideBallWithPaddle(GameState *gameState,
                 resetBall = true;
             }
             // TODO FIXME juicing the ball and paddle sizes breaks this edge bouncing in certain cases
-            /*
+#if 0
             else if (overlapPaddleTop &&
                      //ball->velocity.y > 0.0f &&
                      newPos->y < paddle->position.y)
@@ -463,7 +454,7 @@ internal bool CollideBallWithPaddle(GameState *gameState,
                     ball->bounceCoro = GetFreeCoroutine(gameState);
                 }
             }
-            */
+#endif
         }
     }
 
@@ -499,7 +490,9 @@ internal void SplashCoroutine(CoroutineContext *context,
     {
         nt = (time->seconds - stack->t0) / fadeInTime;
         blend = sinf(nt * 3.141592654f);
-        //printf("T: %f, blend: %f\n", nt, blend);
+#if 0
+        printf("T: %f, blend: %f\n", nt, blend);
+#endif
         Blit(0, 0,
              blend,
              splashscreenBitmap,
@@ -518,11 +511,6 @@ internal void MakeASound(GameState *state,
                          GameMemory *memory,
                          GameSoundOutputBuffer *sound)
 {
-    //for (int i = 0; i < 48000 / 10; ++i)
-    //{
-        //int index = (sound->runningSampleIndex + i) % ArrayCount(state->soundBuffer);
-        //state->soundBuffer[index] = (int16)(-65536 + (memory->DEBUGPlatformRandomNumber() % (2 * 65536)));
-    //}
     float t = 0.0f;
     float period = 48000.0f / 512.0f;
     for (int i = 0; i < 48000 / 2; ++i)
@@ -552,7 +540,6 @@ internal void BounceSizeCoroutine(CoroutineContext *context,
                );
     float t;
     float ease;
-    //const float smoothing = 0.1f;
 
     CORO_BEGIN;
 
@@ -707,9 +694,6 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 
     if (!memory->isInitialized)
     {
-        // TODO kill
-        gameState->audio_tSine = 0.0f;
-
         gameState->mode = Game;
 
         ResetGameSession(memory, gameState);
@@ -729,24 +713,9 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         gameState->promptBitmap = LoadBitmap(memory, gameState, "../data/pressAnyKey.bmp");
         gameState->winnerBitmap = LoadBitmap(memory, gameState, "../data/winner.bmp");
 
-        /*float t = 0.0f;
-        float period = 48000.0f / 512.0f;
-        for (int i = 0; i < ArrayCount(gameState->soundBuffer); ++i)
-        {
-            //gameState->soundBuffer[i] = (int16)(-65536 + (memory->DEBUGPlatformRandomNumber() % (2 * 65536)));
-            gameState->soundBuffer[i] =
-                (int16)(sinf(t) * 3000);
-            t += 6.283185307f * (1.0f / period);
-            if (t > 6.283185307f)
-            {
-                t -= 6.283185307f;
-            }
-        }*/
-
         memory->isInitialized = true;
     }
 
-    // TODO break out
     GameOutputSound(gameState, soundBuffer);
 
     // Clear screen
@@ -785,8 +754,6 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         } break;
         case Game:
         {
-            // TODO Move Game Update into own function?
-
             // Paddle input
             UpdatePaddle(&gameState->paddle[0], &input->player[0], dt);
             UpdatePaddle(&gameState->paddle[1], &input->player[1], dt);
@@ -966,8 +933,6 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
         } break;
         case WinScreen:
         {
-            // TODO move win screen things into the coroutine?
-
             if (!gameState->winCoro)
             {
                 gameState->winCoro = GetFreeCoroutine(gameState);

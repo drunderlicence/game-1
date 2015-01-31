@@ -140,8 +140,10 @@ internal void SDLGetGameCodePath(SDLGameCode *gameCode)
         *s = *t;
     }
 
-    //printf("exe path: %s\n", gameCode->exePath);
-    //printf("dll path: %s\n", gameCode->dllPath);
+#if 0
+    printf("exe path: %s\n", gameCode->exePath);
+    printf("dll path: %s\n", gameCode->dllPath);
+#endif
 }
 
 internal void SDLLoadGameCode(const char *dllName, SDLGameCode *gameCode)
@@ -389,7 +391,6 @@ int main(int argc, char **argv)
     globalRandomContext = &rc;
     SDLTest_RandomInitTime(globalRandomContext);
 
-    // TODO _INIT_EVERYTHING is much slower than _INIT_VIDEO
     SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK | SDL_INIT_AUDIO);
 
     // TODO handle >2 joysticks, and arbitrary mapping to player inputs
@@ -409,16 +410,24 @@ int main(int argc, char **argv)
         }
     }
 
-    // TODO grab and hide mouse
+    SDL_SetRelativeMouseMode(SDL_TRUE);
 
     SDL_Window *const window = SDL_CreateWindow("Pong",
+                                                // TODO make window start in center with WINDOW_POS
+                                                // _UNDEFINED, and make fullscreen
+#if 1
                                                 100, 100,
-                                                //SDL_WINDOWPOS_UNDEFINED,
-                                                //SDL_WINDOWPOS_UNDEFINED,
+#else
+                                                SDL_WINDOWPOS_UNDEFINED,
+                                                SDL_WINDOWPOS_UNDEFINED,
+                                                #endif
+#if 1
                                                 GAME_WIDTH,
                                                 GAME_HEIGHT,
                                                 0);
-                                                //SDL_WINDOW_FULLSCREEN);
+#else
+                                                SDL_WINDOW_FULLSCREEN);
+#endif
     if (window)
     {
         // AUDIO //

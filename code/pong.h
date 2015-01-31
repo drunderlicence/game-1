@@ -86,8 +86,10 @@ struct GameMemory
     const uint64 permanentStorageSize;
     void const *permanentStorage;
 
-    //const uint64 transientStorageSize;
-    //void *transientStorage;
+#if 0
+    const uint64 transientStorageSize;
+    void *transientStorage;
+#endif
 
     debug_platform_random_number *const DEBUGPlatformRandomNumber;
     debug_platform_free_file_memory *const DEBUGPlatformFreeFileMemory;
@@ -182,8 +184,6 @@ struct MemoryZone
 
 struct GameState
 {
-    float audio_tSine;
-
     GameMode mode;
 
     GameTime time;
