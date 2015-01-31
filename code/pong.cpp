@@ -507,63 +507,25 @@ internal void SplashCoroutine(CoroutineContext *context,
     CORO_END;
 }
 
-internal void MakeASound(GameState *state,
-                         GameMemory *memory,
-                         GameSoundOutputBuffer *sound)
+internal void PlaySquareWave(GameState *state,
+                             GameMemory *memory,
+                             GameSoundOutputBuffer *sound,
+                             float frequency,
+                             float length,
+                             float volume,
+                             float duty,
+                             float toneShift)
 {
-    float t = 0.0f;
-    float period = 48000.0f / 1024.0f;
-    for (int i = 0; i < 48000 / 2; ++i)
-    {
-        int index = (sound->runningSampleIndex + i) % ArrayCount(state->soundBuffer);
-        state->soundBuffer[index] += (int16)(sinf(t) * 3000);
-        t += TWOPI * (1.0f / period);
-        if (t > TWOPI)
-        {
-            t -= TWOPI;
-        }
-    }
-}
+    Assert(frequency > 0.0f);
+    Assert(length > 0.0f && length <= SOUND_BUFFER_LENGTH_IN_SECONDS);
+    Assert(duty >= 0.0f && duty <= 1.0f);
+    Assert(toneShift != 0.0f);
 
-internal void ParamSine(GameState *state,
-                        GameMemory *memory,
-                        GameSoundOutputBuffer *sound)
-{
-    float t = 0.0f;
-    float frequency_kHz = 10.6f;
-    float length_Seconds = 0.5f;
-    Assert(length_Seconds <= SOUND_BUFFER_LENGTH_IN_SECONDS);
-    float volume = 3000.0f;
-
-    int sampleCount = (int)((float)SAMPLE_HZ * length_Seconds);
-    for (int i = 0; i < sampleCount; ++i)
-    {
-        int index = (sound->runningSampleIndex + i) % ArrayCount(state->soundBuffer);
-        state->soundBuffer[index] += (int16)(sinf(t) * volume);
-
-        volume *= 0.9999f;
-
-        t += TWOPI * (frequency_kHz / 1000.0f);
-        while (t > TWOPI)
-        {
-            t -= TWOPI;
-        }
-    }
-}
-
-internal void ParamSquare(GameState *state,
-                          GameMemory *memory,
-                          GameSoundOutputBuffer *sound)
-{
-    float frequency = 140.0f;
     float period_speed = frequency / (float)SAMPLE_HZ;
     float period_position = 0.0f;
 
-    float length_Seconds = 0.15f;
-    Assert(length_Seconds <= SOUND_BUFFER_LENGTH_IN_SECONDS);
-    float volume = 2500.0f;
 
-    int sampleCount = (int)((float)SAMPLE_HZ * length_Seconds);
+    int sampleCount = (int)((float)SAMPLE_HZ * length);
     for (int i = 0; i < sampleCount; ++i)
     {
         period_position += period_speed;
@@ -572,10 +534,9 @@ internal void ParamSquare(GameState *state,
             period_position -= 1.0f;
         }
 
-        int16 sample = (int16)(period_position < 0.4f ? -volume : volume);
+        int16 sample = (int16)(period_position < duty ? -volume : volume);
 
-        //frequency += 0.05f;
-        frequency *= 1.00008f;
+        frequency *= toneShift;
         period_speed = frequency / (float)SAMPLE_HZ;
 
         int index = (sound->runningSampleIndex + i) % ArrayCount(state->soundBuffer);
@@ -605,7 +566,9 @@ internal void BounceSizeCoroutine(CoroutineContext *context,
     stack->a0 = *a;
     stack->a1 = *a * bounceScale;
 
-    ParamSquare(state, memory, sound);
+    PlaySquareWave(state, memory, sound,
+                   140.0f, 0.15f, 2500.0f,
+                   0.4f, 1.00008f);
 
     while (time->seconds - stack->t0 <= timeSpan)
     {
@@ -885,6 +848,10 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                               -1.0f,
                               memory->DEBUGPlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f);
                     gameState->scores[1]++;
+
+                    PlaySquareWave(gameState, memory, soundBuffer,
+                                   140.0f, 0.8f, 3000.0f,
+                                   0.2f, 0.9999f);
                 }
             }
             // Player 2
