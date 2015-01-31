@@ -3,6 +3,7 @@
 
 internal void GameOutputSound(GameState *state, GameSoundOutputBuffer *soundBuffer)
 {
+    local_persist uint32 lastRSI = 0;
     int16 *sampleOut = soundBuffer->samples;
     for (int i = 0; i < soundBuffer->sampleCount; ++i)
     {
@@ -10,8 +11,27 @@ internal void GameOutputSound(GameState *state, GameSoundOutputBuffer *soundBuff
         int16 sampleValue = state->soundBuffer[index];
         *sampleOut++ = sampleValue;
         *sampleOut++ = sampleValue;
+        //state->soundBuffer[index] = 0;
+    }
+    printf("dRSI: %d, SC: %d, diff: %d\n",
+           soundBuffer->runningSampleIndex - lastRSI,
+           soundBuffer->sampleCount,
+           soundBuffer->sampleCount - (soundBuffer->runningSampleIndex - lastRSI));
+    for (int i = lastRSI; i < soundBuffer->runningSampleIndex; ++i)
+    {
+        int index = i % ArrayCount(state->soundBuffer);
         state->soundBuffer[index] = 0;
     }
+    lastRSI = soundBuffer->runningSampleIndex;
+    /*for (int i = 0; i < soundBuffer->sampleCount*4; ++i)
+    {
+        int index = (soundBuffer->runningSampleIndex - 1 - i);
+        if (index < 0)
+        {
+            index %= ArrayCount(state->soundBuffer);
+            state->soundBuffer[index] = 0;
+        }
+    }*/
 }
 
 inline int RoundFloatToInt(float real)
@@ -498,10 +518,22 @@ internal void MakeASound(GameState *state,
                          GameMemory *memory,
                          GameSoundOutputBuffer *sound)
 {
-    for (int i = 0; i < 48000 / 10; ++i)
+    //for (int i = 0; i < 48000 / 10; ++i)
+    //{
+        //int index = (sound->runningSampleIndex + i) % ArrayCount(state->soundBuffer);
+        //state->soundBuffer[index] = (int16)(-65536 + (memory->DEBUGPlatformRandomNumber() % (2 * 65536)));
+    //}
+    float t = 0.0f;
+    float period = 48000.0f / 512.0f;
+    for (int i = 0; i < 48000 / 2; ++i)
     {
         int index = (sound->runningSampleIndex + i) % ArrayCount(state->soundBuffer);
-        state->soundBuffer[index] = (int16)(-65536 + (memory->DEBUGPlatformRandomNumber() % (2 * 65536)));
+        state->soundBuffer[index] += (int16)(sinf(t) * 3000);
+        t += 6.283185307f * (1.0f / period);
+        if (t > 6.283185307f)
+        {
+            t -= 6.283185307f;
+        }
     }
 }
 
