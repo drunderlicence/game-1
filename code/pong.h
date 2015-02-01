@@ -24,6 +24,9 @@ typedef double real64;
 
 typedef size_t memory_index;
 
+#define PI    3.141592654f
+#define TWOPI 6.283185307f
+
 #if PONG_SLOW
 #define Assert(condition) if (!(condition)) {*(int *)0 = 0;}
 #else
@@ -42,7 +45,11 @@ typedef size_t memory_index;
 #define BYTES_PER_PIXEL 4
 #define GAME_HUD_HEIGHT 80
 #define GAME_PLAY_HEIGHT (GAME_HEIGHT - GAME_HUD_HEIGHT)
-#define WIN_SCORE 9
+#define WIN_SCORE 3
+
+#define SAMPLE_HZ 48000
+#define SOUND_LATENCY 15
+#define SOUND_BUFFER_LENGTH_IN_SECONDS 10
 
 #include "big_numbers.h"
 #include "coroutines.h"
@@ -56,11 +63,28 @@ struct OffscreenBuffer
     void *memory;
 };
 
-#define PLATFORM_RANDOM_NUMBER(name) int name()
-typedef PLATFORM_RANDOM_NUMBER(platform_random_number);
+struct GameSoundOutputBuffer
+{
+    int samplesPerSecond;
+    int sampleCount;
+    uint32 runningSampleIndex;
+    int16 *samples;
+};
 
-#define PLATFORM_LOAD_BMP(name) OffscreenBuffer name(const char *const filename, void *bitmapMemory)
-typedef PLATFORM_LOAD_BMP(platform_load_bmp);
+#define DEBUG_PLATFORM_RANDOM_NUMBER(name) int name()
+typedef DEBUG_PLATFORM_RANDOM_NUMBER(debug_platform_random_number);
+
+struct DEBUGReadFileResult
+{
+    uint32 size;
+    void *contents;
+};
+
+#define DEBUG_PLATFORM_FREE_FILE_MEMORY(name) void name(void *memory)
+typedef DEBUG_PLATFORM_FREE_FILE_MEMORY(debug_platform_free_file_memory);
+
+#define DEBUG_PLATFORM_READ_ENTIRE_FILE(name) DEBUGReadFileResult name(char *filename)
+typedef DEBUG_PLATFORM_READ_ENTIRE_FILE(debug_platform_read_entire_file);
 
 struct GameMemory
 {
@@ -69,11 +93,14 @@ struct GameMemory
     const uint64 permanentStorageSize;
     void const *permanentStorage;
 
-    //const uint64 transientStorageSize;
-    //void *transientStorage;
+#if 0
+    const uint64 transientStorageSize;
+    void *transientStorage;
+#endif
 
-    platform_random_number *const PlatformRandomNumber;
-    platform_load_bmp *const PlatformLoadBMP;
+    debug_platform_random_number *const DEBUGPlatformRandomNumber;
+    debug_platform_free_file_memory *const DEBUGPlatformFreeFileMemory;
+    debug_platform_read_entire_file *const DEBUGPlatFormReadEntireFile;
 };
 
 struct IntVector2
@@ -126,6 +153,7 @@ enum GameMode
     Splash,
     Titles,
     Game,
+    WinScreen,
 };
 
 struct GameTime
@@ -136,17 +164,22 @@ struct GameTime
 
 struct BallState
 {
-    float size;
+    float radius;
     Vector2 position;
     float speed;
     Vector2 velocity;
+
+    CoroutineContext *bounceCoro;
 };
 
 struct PaddleState
 {
     float width;
     float height;
+    float restWidth;
+    float restHeight;
     Vector2 position;
+    Vector2 newPosition;
 };
 
 struct MemoryZone
@@ -167,9 +200,9 @@ struct GameState
 
     int scores[2];
 
-    //OffscreenBuffer splashscreenBitmap;
-
     CoroutineContext *splashscreenCoro;
+    CoroutineContext *resetCoro;
+    CoroutineContext *winCoro;
     CoroutineContext coroutines[100];
 
     MemoryZone bitmapsZone;
@@ -178,9 +211,14 @@ struct GameState
     OffscreenBuffer *splashscreenBitmap;
     OffscreenBuffer *titlesBitmap;
     OffscreenBuffer *promptBitmap;
+    OffscreenBuffer *winnerBitmap;
+
+    // samples per sec * seconds * bytes per sample (single channel)
+    // NOTE just using same sample for both channels
+    int16 soundBuffer[SAMPLE_HZ * SOUND_BUFFER_LENGTH_IN_SECONDS * sizeof(int16)];
 };
 
-#define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory, GameInput *input, float dt, OffscreenBuffer *buffer)
+#define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory, GameInput *input, float dt, OffscreenBuffer *buffer, GameSoundOutputBuffer *soundBuffer)
 typedef GAME_UPDATE_AND_RENDER(game_update_and_render);
 
 

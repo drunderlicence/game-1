@@ -1,9 +1,33 @@
 #include "pong.h"
 #include "math.h"
 
+internal void GameOutputSound(GameState *state, GameSoundOutputBuffer *soundBuffer)
+{
+    local_persist uint32 lastRSI = 0;
+    int16 *sampleOut = soundBuffer->samples;
+    for (int i = 0; i < soundBuffer->sampleCount; ++i)
+    {
+        int index = (soundBuffer->runningSampleIndex + i) % ArrayCount(state->soundBuffer);
+        int16 sampleValue = state->soundBuffer[index];
+        *sampleOut++ = sampleValue;
+        *sampleOut++ = sampleValue;
+    }
+#if 0
+    printf("dRSI: %d, SC: %d, diff: %d\n",
+           soundBuffer->runningSampleIndex - lastRSI,
+           soundBuffer->sampleCount,
+           soundBuffer->sampleCount - (soundBuffer->runningSampleIndex - lastRSI));
+#endif
+    for (int i = lastRSI; i < soundBuffer->runningSampleIndex; ++i)
+    {
+        int index = i % ArrayCount(state->soundBuffer);
+        state->soundBuffer[index] = 0;
+    }
+    lastRSI = soundBuffer->runningSampleIndex;
+}
+
 inline int RoundFloatToInt(float real)
 {
-    // TODO find intrinsic?
     return (int)(real + 0.5f);
 }
 
@@ -24,12 +48,32 @@ inline float min(float a, float b)
 
 inline float clamp(float in, float min, float max)
 {
-    //return max(min, min(max, in));
     return in > min ? (in < max ? in : max) : min;
 }
 
+inline float abs(float in)
+{
+    return in < 0.0f ? -in : in;
+}
+
+internal CoroutineContext *GetFreeCoroutine(GameState *state)
+{
+    CoroutineContext *c = 0;
+    for (int i = 0; i < ArrayCount(state->coroutines); ++i)
+    {
+        if (!state->coroutines[i].jmp)
+        {
+            c = &state->coroutines[i];
+            break;
+        }
+    }
+    Assert(c); // Ran out of coroutines
+    c->jmp = CORO_INITIALIZED;
+    return c;
+}
+
 internal void Blit(const float destLeft, const float destTop,
-                   const float blend,
+                   float blend,
                    const OffscreenBuffer *const src,
                    OffscreenBuffer *dest)
 {
@@ -41,7 +85,8 @@ internal void Blit(const float destLeft, const float destTop,
     uint8 *srcRow = (uint8 *)src->memory;
     uint8 *destRow = (uint8 *)dest->memory + minX * dest->bytesPerPixel + minY * dest->pitch;
 
-    Assert(blend >= 0.0f && blend <= 1.0f); // TODO clamping
+    blend = clamp(blend, 0.0f, 1.0f);
+    Assert(blend >= 0.0f && blend <= 1.0f);
     const float oneMinusBlend = 1.0f - blend;
 
     for (int y = minY; y < maxY; ++y)
@@ -50,8 +95,10 @@ internal void Blit(const float destLeft, const float destTop,
         uint32 *destPixel = (uint32 *)destRow;
         for (int x = minX; x < maxX; ++x)
         {
+#if 0
             // use this for non blending
-            /**destPixel++ = *srcPixel++;*/
+            destPixel++ = *srcPixel++;
+#else
             // will it blend?
             float r =
                 (float)((*srcPixel & 0x00FF0000) >> 16) * blend +
@@ -66,6 +113,7 @@ internal void Blit(const float destLeft, const float destTop,
                             ((RoundFloatToInt(g) <<  8) & 0x0000FF00) |
                             ((RoundFloatToInt(b) <<  0) & 0x000000FF));
             srcPixel++;
+#endif
         }
 
         srcRow += src->pitch;
@@ -150,7 +198,7 @@ internal void DrawLineVert(const float top,
 
     for (int y = minY; y < maxY; ++y)
     {
-        uint32 *pixel = (uint32 *)row;
+            uint32 *pixel = (uint32 *)row;
         *pixel++ = color;
 
         row += buffer->pitch;
@@ -207,12 +255,38 @@ internal void DrawBigNumber(const char *const bytes,
 
 }
 
+internal void InvertBuffer(const float left,
+                           const float top,
+                           const float right,
+                           const float bottom,
+                           OffscreenBuffer *buffer)
+{
+    const int minX = clamp(RoundFloatToInt(left), 0, buffer->width);
+    const int minY = clamp(RoundFloatToInt(top), 0, buffer->height);
+    const int maxX = clamp(RoundFloatToInt(right), 0, buffer->width);
+    const int maxY = clamp(RoundFloatToInt(bottom), 0, buffer->height);
+
+    uint8 *row = (uint8 *)buffer->memory + minX*buffer->bytesPerPixel + minY*buffer->pitch;
+
+    for (int y = minY; y < maxY; ++y)
+    {
+        uint32 *pixel = (uint32 *)row;
+        for (int x = minX; x < maxX; ++x)
+        {
+
+            *pixel= 0xFFFFFFFF - *pixel;
+            pixel++;
+        }
+
+        row += buffer->pitch;
+    }
+}
+
 internal void ResetBall(BallState *ball, const float x, const float y)
 {
-        ball->size       = 15.0f;
+        ball->radius     = 7.0f;
         ball->position.x = GAME_WIDTH * 0.5f;
-        //ball->position.x = 100.0f;
-        ball->position.y = GAME_HUD_HEIGHT + GAME_PLAY_HEIGHT * 0.5f;// + 120.0f;
+        ball->position.y = GAME_HUD_HEIGHT + GAME_PLAY_HEIGHT * 0.5f;
         ball->speed      = 100.0f; // pixels per second
         ball->velocity.x = x;
         ball->velocity.y = y;
@@ -220,47 +294,100 @@ internal void ResetBall(BallState *ball, const float x, const float y)
 
 internal void ResetPaddle(PaddleState *paddle, float x)
 {
-    paddle->width = 10.0f;
-    paddle->height = 60.0f;
-    paddle->position.x = x;
-    paddle->position.y = GAME_HUD_HEIGHT + GAME_PLAY_HEIGHT * 0.5f;
+    paddle->restWidth = paddle->width = 10.0f;
+    paddle->restHeight = paddle->height = 60.0f;
+    paddle->newPosition.x = paddle->position.x = x;
+    paddle->newPosition.y = paddle->position.y = GAME_HUD_HEIGHT + GAME_PLAY_HEIGHT * 0.5f;
+}
+
+internal void ResetGameSession(GameMemory *memory, GameState *gameState)
+{
+    ResetBall(&gameState->ball,
+              memory->DEBUGPlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f,
+              memory->DEBUGPlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f);
+
+    ResetPaddle(&gameState->paddle[0], 20.0f);
+    ResetPaddle(&gameState->paddle[1], GAME_WIDTH - 20.0f);
+
+    gameState->scores[0] = 0;
+    gameState->scores[1] = 0;
+}
+
+inline float lerp(float a, float b, float t)
+{
+    return (1.0f - t) * a + t * b;
+}
+
+inline float smooth(float a, float b, float smooth)
+{
+    Assert(smooth <= 1.0f && smooth >= 0.0f);
+    float result = a + (b - a) * smooth;
+    return result;
 }
 
 internal void UpdatePaddle(PaddleState *const paddle,
                            GamePlayerInput *const playerInput,
                            const float dt)
 {
+    const float lastY = paddle->position.y;
+    const float paddleSmoothing = 0.5f;
+    const float paddleSpeedSmoothing = 0.5f;
+    const float paddleStretchScale = GAME_HEIGHT * 0.25f;
+    const float paddleMaxStretch = 3.0f;
+    const float paddleMoveSpeed = 600.0f / paddleSmoothing;
+
     if(playerInput->isUsingJoystick)
     {
         const float center = GAME_HUD_HEIGHT + GAME_PLAY_HEIGHT * 0.5f;
-        const float dY = (float)((GAME_HEIGHT - GAME_HUD_HEIGHT) - paddle->height) / 2.0f;
-        paddle->position.y = center + dY * playerInput->joystickAxis;
+        const float offsetY = (float)((GAME_HEIGHT - GAME_HUD_HEIGHT) - paddle->height) / 2.0f;
+        paddle->newPosition.y = center + offsetY * playerInput->joystickAxis;
     }
     else
     {
-        const float paddleMoveSpeed = 300.0f;
         if (playerInput->moveUp.isDown)
         {
-            paddle->position.y -= paddleMoveSpeed * dt;
+            paddle->newPosition.y = paddle->position.y - paddleMoveSpeed * dt;
         }
         if (playerInput->moveDown.isDown)
         {
-            paddle->position.y += paddleMoveSpeed * dt;
+            paddle->newPosition.y = paddle->position.y + paddleMoveSpeed * dt;
         }
+    }
 
-        const float halfPaddleHeight = paddle->height * 0.5f;
-        if (paddle->position.y - halfPaddleHeight < GAME_HUD_HEIGHT)
-        {
-            paddle->position.y = GAME_HUD_HEIGHT + halfPaddleHeight;
-        }
-        if (paddle->position.y + halfPaddleHeight > GAME_HEIGHT)
-        {
-            paddle->position.y = GAME_HEIGHT - halfPaddleHeight;
-        }
+    paddle->position.y += (paddle->newPosition.y - paddle->position.y) * paddleSmoothing;
+
+    float dy = lastY - paddle->position.y;
+    dy = abs(dy);
+    Assert(dy >= 0.0f);
+    dy /= paddleStretchScale;
+    dy = clamp(dy, 0.0f, 1.0f);
+    Assert(dy >= 0.0f && dy <= 1.0f);
+    const float scale = lerp(1.0f, paddleMaxStretch, dy);
+    {
+        const float newHeight = paddle->restHeight * scale;
+        paddle->height += (newHeight - paddle->height) * paddleSpeedSmoothing;
+    }
+    {
+        const float newWidth = paddle->restWidth * (1.0f / scale);
+        paddle->width += (newWidth - paddle->width) * paddleSpeedSmoothing;
+    }
+#if 0
+    printf("%f %f\n", paddle->height, paddle->width);
+#endif
+
+    const float halfPaddleHeight = paddle->height * 0.5f;
+    if (paddle->position.y - halfPaddleHeight < GAME_HUD_HEIGHT)
+    {
+        paddle->position.y = GAME_HUD_HEIGHT + halfPaddleHeight;
+    }
+    if (paddle->position.y + halfPaddleHeight > GAME_HEIGHT)
+    {
+        paddle->position.y = GAME_HEIGHT - halfPaddleHeight;
     }
 }
 
-internal bool CollideBallWithPaddle(BallState *const ball,
+internal bool CollideBallWithPaddle(GameState *gameState,
+                                    BallState *const ball,
                                     PaddleState *const paddle,
                                     const bool32 isBeyondPaddle,
                                     const bool32 wasBeyondPaddle,
@@ -272,13 +399,12 @@ internal bool CollideBallWithPaddle(BallState *const ball,
 {
     bool32 resetBall = false;
 
-    const float halfBallSize = ball->size * 0.5f;
     const float halfPaddleHeight = paddle->height * 0.5f;
 
     if (isBeyondPaddle)
     {
-        const bool32 overlapPaddleTop = newPos->y + halfBallSize > paddle->position.y - halfPaddleHeight;
-        const bool32 overlapPaddleBottom = newPos->y - halfBallSize < paddle->position.y + halfPaddleHeight;
+        const bool32 overlapPaddleTop = newPos->y + ball->radius > paddle->position.y - halfPaddleHeight;
+        const bool32 overlapPaddleBottom = newPos->y - ball->radius < paddle->position.y + halfPaddleHeight;
 
         if (!wasBeyondPaddle)
         {
@@ -286,6 +412,11 @@ internal bool CollideBallWithPaddle(BallState *const ball,
             {
                 ball->velocity.x = bounceVelocityX;
                 newPos->x = bouncePositionX;
+
+                if (!ball->bounceCoro) // don't do bounce effect if one is already playing
+                {
+                    ball->bounceCoro = GetFreeCoroutine(gameState);
+                }
             }
         }
         else
@@ -294,12 +425,19 @@ internal bool CollideBallWithPaddle(BallState *const ball,
             {
                 resetBall = true;
             }
+            // TODO FIXME juicing the ball and paddle sizes breaks this edge bouncing in certain cases
+#if 0
             else if (overlapPaddleTop &&
                      //ball->velocity.y > 0.0f &&
                      newPos->y < paddle->position.y)
             {
                 ball->velocity.y = -1.0f;
-                newPos->y = paddle->position.y - halfPaddleHeight - halfBallSize;
+                newPos->y = paddle->position.y - halfPaddleHeight - ball->radius;
+
+                if (!ball->bounceCoro) // don't do bounce effect if one is already playing
+                {
+                    ball->bounceCoro = GetFreeCoroutine(gameState);
+                }
             }
             else if (overlapPaddleBottom &&
                      //ball->velocity.y < 0.0f &&
@@ -308,9 +446,15 @@ internal bool CollideBallWithPaddle(BallState *const ball,
                 ball->velocity.y = 1.0f;
                 // TODO Feels better with ball-stops-paddle,
                 // but should paddle-stops-ball?
-                paddle->position.y = newPos->y - halfBallSize - halfPaddleHeight;
-                //newPos->y = halfBallSize + paddle->position.y + halfPaddleHeight;
+                paddle->position.y = newPos->y - ball->radius - halfPaddleHeight;
+                //newPos->y = ball->radius + paddle->position.y + halfPaddleHeight;
+                //
+                if (!ball->bounceCoro) // don't do bounce effect if one is already playing
+                {
+                    ball->bounceCoro = GetFreeCoroutine(gameState);
+                }
             }
+#endif
         }
     }
 
@@ -330,51 +474,6 @@ internal void DrawPaddle(PaddleState *const paddle, OffscreenBuffer *buffer)
              buffer);
 }
 
-internal CoroutineContext *GetFreeCoroutine(GameState *state)
-{
-    CoroutineContext *c = 0;
-    for (int i = 0; i < ArrayCount(state->coroutines); ++i)
-    {
-        if (!state->coroutines[i].jmp)
-        {
-            c = &state->coroutines[i];
-            break;
-        }
-    }
-    Assert(c); // Ran out of coroutines
-    c->jmp = CORO_INITIALIZED;
-    return c;
-}
-
-/* internal int counterFunction(CoroutineContext *context, GameTime *time, int updateEveryNthFrame)
-{
-    CORO_STACK(int i;
-               );
-    const int MAX = 5;
-
-    CORO_BEGIN;
-    while (true)
-    {
-        for (stack->i = 0; stack->i < MAX; ++stack->i)
-        {
-            do
-            {
-                YIELD(stack->i);
-            } while (time->frameCount % updateEveryNthFrame != 0);
-        }
-
-        for (stack->i = MAX; stack->i > 0; --stack->i)
-        {
-            do
-            {
-                YIELD(stack->i);
-            } while (time->frameCount % updateEveryNthFrame != 0);
-        }
-    }
-    printf("Ending coroutine\n");
-    CORO_END;
-}*/
-
 internal void SplashCoroutine(CoroutineContext *context,
                               GameTime *time,
                               float fadeInTime,
@@ -390,8 +489,10 @@ internal void SplashCoroutine(CoroutineContext *context,
     while(time->seconds - stack->t0 <= fadeInTime)
     {
         nt = (time->seconds - stack->t0) / fadeInTime;
-        blend = sinf(nt * 3.141592654f);
-        //printf("T: %f, blend: %f\n", nt, blend);
+        blend = sinf(nt * PI);
+#if 0
+        printf("T: %f, blend: %f\n", nt, blend);
+#endif
         Blit(0, 0,
              blend,
              splashscreenBitmap,
@@ -400,6 +501,144 @@ internal void SplashCoroutine(CoroutineContext *context,
     }
     stack->t0 = time->seconds;
     while(time->seconds - stack->t0 <= fadeInTime * 0.2f)
+    {
+        YIELD( );
+    }
+    CORO_END;
+}
+
+internal void PlaySquareWave(GameState *state,
+                             GameMemory *memory,
+                             GameSoundOutputBuffer *sound,
+                             float frequency,
+                             float length,
+                             float volume,
+                             float duty,
+                             float toneShift)
+{
+    Assert(frequency > 0.0f);
+    Assert(length > 0.0f && length <= SOUND_BUFFER_LENGTH_IN_SECONDS);
+    Assert(duty >= 0.0f && duty <= 1.0f);
+    Assert(toneShift != 0.0f);
+
+    float period_speed = frequency / (float)SAMPLE_HZ;
+    float period_position = 0.0f;
+
+
+    int sampleCount = (int)((float)SAMPLE_HZ * length);
+    for (int i = 0; i < sampleCount; ++i)
+    {
+        period_position += period_speed;
+        while (period_position >= 1.0f)
+        {
+            period_position -= 1.0f;
+        }
+
+        int16 sample = (int16)(period_position < duty ? -volume : volume);
+
+        frequency *= toneShift;
+        period_speed = frequency / (float)SAMPLE_HZ;
+
+        int index = (sound->runningSampleIndex + i) % ArrayCount(state->soundBuffer);
+        state->soundBuffer[index] += sample;
+    }
+}
+
+internal void BounceSizeCoroutine(CoroutineContext *context,
+                                  GameState *state,
+                                  GameMemory *memory,
+                                  GameSoundOutputBuffer *sound,
+                                  GameTime *time,
+                                  float timeSpan,
+                                  float bounceScale,
+                                  float *a)
+{
+    CORO_STACK(float t0;
+               float a0;
+               float a1;
+               );
+    float t;
+    float ease;
+
+    CORO_BEGIN;
+
+    stack->t0 = time->seconds;
+    stack->a0 = *a;
+    stack->a1 = *a * bounceScale;
+
+    PlaySquareWave(state, memory, sound,
+                   140.0f, 0.15f, 2500.0f,
+                   0.4f, 1.00008f);
+
+    while (time->seconds - stack->t0 <= timeSpan)
+    {
+        t = (time->seconds - stack->t0) / timeSpan;
+        if ( t < 0.5f)
+        {
+            ease = lerp(stack->a0, stack->a1, 2.0f*t);
+        }
+        else
+        {
+            ease = lerp(stack->a1, stack->a0, 2.0f*(t - 0.5f));
+        }
+        *a = ease;
+        YIELD( );
+    }
+
+    *a = stack->a0;
+
+    CORO_END;
+}
+
+internal void ResetCoroutine(CoroutineContext *context,
+                             GameTime *time,
+                             GameState *state,
+                             GameMemory *memory,
+                             float resetTime,
+                             int scorer)
+{
+    CORO_STACK(float t0;
+               int scorer;);
+
+    float dir;
+
+    CORO_BEGIN;
+
+    stack->t0 = time->seconds;
+    stack->scorer = scorer;
+
+    state->ball.radius = 0.0f;
+
+    while(time->seconds - stack->t0 <= resetTime)
+    {
+        YIELD( );
+    }
+
+    // select direction from who scored
+    dir = stack->scorer == 0 ? 1.0f : -1.0f;
+
+    ResetBall(&state->ball,
+              dir,
+              memory->DEBUGPlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f);
+    state->scores[stack->scorer]++;
+
+    CORO_END;
+}
+
+internal void WinCoroutine(CoroutineContext *context,
+                           GameTime *time,
+                           float winTime,
+                           GameInput *input)
+{
+    CORO_STACK(float t0;
+               );
+    CORO_BEGIN;
+    stack->t0 = time->seconds;
+    while(time->seconds - stack->t0 <= winTime)
+    {
+        YIELD( );
+    }
+    while(!input->anyButton.isDown)
     {
         YIELD( );
     }
@@ -424,58 +663,114 @@ void *PushSize_(MemoryZone *zone, memory_index size)
     return result;
 }
 
-internal OffscreenBuffer *LoadBitmap(GameMemory *memory, GameState *state, const char *filename)
+#pragma pack(push, 1)
+struct BitmapHeader
 {
-    OffscreenBuffer *bmp = &state->bitmaps[state->nextBmp++];
-    Assert(state->nextBmp < ArrayCount(state->bitmaps));
+    uint16 fileType;
+    uint32 fileSize;
+    uint16 reserved1;
+    uint16 reserved2;
+    uint32 bitmapOffset;
+    uint32 size;
+    int32 width;
+    int32 height;
+    uint16 planes;
+    uint16 bitsPerPixel;
+    uint32 compression;
+    uint32 sizeOfBitmap;
+    int32 horzResolution;
+    int32 vertResolution;
+    uint32 colorsUsed;
+    uint32 colorsImportant;
 
-    *bmp = memory->PlatformLoadBMP(filename, state->bitmapsZone.base + state->bitmapsZone.used);
-    if (bmp->width && bmp->height)
+    uint32 redMask;
+    uint32 greenMask;
+    uint32 blueMask;
+};
+#pragma pack(pop)
+
+internal OffscreenBuffer *LoadBitmap(GameMemory *memory, GameState *state, char *filename)
+{
+    DEBUGReadFileResult bmpFile = memory->DEBUGPlatFormReadEntireFile(filename);
+    Assert(bmpFile.contents && bmpFile.size);
+
+    BitmapHeader *header = (BitmapHeader *)bmpFile.contents;
+
+    uint16 fileType;
+    char *ft = (char *)(&fileType);
+    ft[0] = 'B';
+    ft[1] = 'M';
+    Assert(header->fileType == fileType && header->bitsPerPixel == 24 && header->compression == 0);
+
+    uint8 *pixels = (uint8 *)bmpFile.contents + header->bitmapOffset;
+    int srcPitch = header->width * (header->bitsPerPixel / 8);
+
+    OffscreenBuffer bmp = {};
+    bmp.bytesPerPixel = BYTES_PER_PIXEL;
+    bmp.width = header->width;
+    bmp.height = header->height;
+    bmp.pitch = header->width * BYTES_PER_PIXEL;
+    bmp.memory = PushSize_(&state->bitmapsZone, bmp.width * bmp.height * BYTES_PER_PIXEL);
+
+    uint8 *srcRow = (uint8 *)pixels;
+    uint8 *destRow = (uint8 *)bmp.memory + (bmp.height - 1) * bmp.pitch;
+
+    for (int y = 0; y < bmp.height; ++y)
     {
-        PushSize_(&state->bitmapsZone, bmp->width * bmp->height * BYTES_PER_PIXEL);
-        return bmp;
+        uint8 *srcPixelElement = (uint8 *)srcRow;
+        uint32 *destPixel = (uint32 *)destRow;
+        for (int x = 0; x < bmp.width; ++x)
+        {
+            uint8 blue = *srcPixelElement++;
+            uint8 green = *srcPixelElement++;
+            uint8 red = *srcPixelElement++;
+
+            uint32 pixel = ((red << 16) | (green << 8) | (blue));
+            *destPixel++ = pixel;
+        }
+        srcRow += srcPitch;
+        destRow -= bmp.pitch;
     }
-    else
-    {
-        Assert(bmp->width && bmp->height);
-        // TODO logging
-        return 0;
-    }
+
+    memory->DEBUGPlatformFreeFileMemory(bmpFile.contents);
+
+    OffscreenBuffer *result = &state->bitmaps[state->nextBmp++];
+    Assert(state->nextBmp < ArrayCount(state->bitmaps));
+    *result = bmp;
+    return result;
 }
 
 extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
 {
     Assert(sizeof(GameState) <= memory->permanentStorageSize);
 
+
     GameState *gameState = (GameState *)memory->permanentStorage;
 
     if (!memory->isInitialized)
     {
-        //gameState->mode = Tiles;
+        gameState->mode = Splash;
 
-        ResetBall(&gameState->ball,
-                  memory->PlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f,
-                  memory->PlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f);
-
-        ResetPaddle(&gameState->paddle[0], 20.0f);
-        ResetPaddle(&gameState->paddle[1], GAME_WIDTH - 20.0f);
+        ResetGameSession(memory, gameState);
 
         InitializeZone(&gameState->bitmapsZone,
                        memory->permanentStorageSize - sizeof(GameState),
                        (uint8 *)memory->permanentStorage + sizeof(GameState));
 
-        // TODO proper resource paths
-        gameState->splashscreenBitmap = LoadBitmap(memory, gameState, "../data/drul.bmp");
+        gameState->splashscreenBitmap = LoadBitmap(memory, gameState, "data/drul.bmp");
         if (gameState->splashscreenBitmap)
         {
             gameState->splashscreenCoro = GetFreeCoroutine(gameState);
         }
 
-        gameState->titlesBitmap = LoadBitmap(memory, gameState, "../data/titlesScreen.bmp");
-        gameState->promptBitmap = LoadBitmap(memory, gameState, "../data/pressAnyKey.bmp");
+        gameState->titlesBitmap = LoadBitmap(memory, gameState, "data/titlesScreen.bmp");
+        gameState->promptBitmap = LoadBitmap(memory, gameState, "data/pressAnyKey.bmp");
+        gameState->winnerBitmap = LoadBitmap(memory, gameState, "data/winner.bmp");
 
         memory->isInitialized = true;
     }
+
+    GameOutputSound(gameState, soundBuffer);
 
     // Clear screen
     DrawRect(0, 0, GAME_WIDTH, GAME_HEIGHT, 0.0f, 0.0f, 0.0f, buffer);
@@ -492,7 +787,7 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
                                 gameState->splashscreenBitmap,
                                 buffer);
                 if (!gameState->splashscreenCoro->jmp)
-                {   // coro is over
+                {   //    coro is over
                     gameState->splashscreenCoro = 0;
                     gameState->mode = Titles;
                 }
@@ -510,7 +805,6 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             {
                 Blit(0, 300, 1.0f, gameState->promptBitmap, buffer);
             }
-            //DrawLineHorz(0.0f, GAME_WIDTH, GAME_HUD_HEIGHT, 1.0f, 1.0f, 1.0f, buffer);
         } break;
         case Game:
         {
@@ -518,128 +812,190 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             UpdatePaddle(&gameState->paddle[0], &input->player[0], dt);
             UpdatePaddle(&gameState->paddle[1], &input->player[1], dt);
 
-            // Update ball
             BallState *const ball = &gameState->ball;
-            Vector2 newPos;
-            newPos.x = ball->position.x + ball->velocity.x * ball->speed * dt;
-            newPos.y = ball->position.y + ball->velocity.y * ball->speed * dt;
 
-            // Collide ball
-            const float halfBallSize = ball->size * 0.5f;
-            if (newPos.y - halfBallSize < GAME_HUD_HEIGHT && ball->velocity.y < 0.0f)
+            // Ball isn't resetting
+            if (!gameState->resetCoro)
             {
-                ball->velocity.y = 1.0f;
-                ball->speed *= 1.1f;
-                newPos.y = GAME_HUD_HEIGHT + halfBallSize;
-            }
-            else if (newPos.y + halfBallSize > GAME_HEIGHT && ball->velocity.y > 0.0f)
-            {
-                ball->velocity.y = -1.0f;
-                ball->speed *= 1.1f;
-                newPos.y = GAME_HEIGHT - halfBallSize;
-            }
+                // Update ball
+                Vector2 newPos;
+                newPos.x = ball->position.x + ball->velocity.x * ball->speed * dt;
+                newPos.y = ball->position.y + ball->velocity.y * ball->speed * dt;
 
-            // Collide with paddles
-            bool32 didReset = false;
-            // Player 1
-            {
-                PaddleState *const paddle = &gameState->paddle[0];
-
-                const float halfBallSize = ball->size * 0.5f;
-                const float halfPaddleWidth = paddle->width * 0.5f;
-
-                const bool32 isBeyondPaddle =
-                    newPos.x - halfBallSize <= paddle->position.x + halfPaddleWidth;
-
-                const bool32 wasBeyondPaddle =
-                    ball->position.x - halfBallSize < paddle->position.x + halfPaddleWidth;
-
-                const bool32 isMovingTowardPaddle =
-                    ball->velocity.x < 0.0f;
-
-                const float bounceVelocityX = 1.0f;
-                const float bouncePositionX = halfBallSize + paddle->position.x + halfPaddleWidth;
-
-                const bool32 isOutOfBounds = newPos.x + halfBallSize < 0.0f;
-
-                const bool32 shouldReset = CollideBallWithPaddle(ball,
-                                                                 paddle,
-                                                                 isBeyondPaddle,
-                                                                 wasBeyondPaddle,
-                                                                 isMovingTowardPaddle,
-                                                                 bounceVelocityX,
-                                                                 bouncePositionX,
-                                                                 isOutOfBounds,
-                                                                 &newPos);
-                if (shouldReset)
+                // Collide ball
+                if (newPos.y - ball->radius < GAME_HUD_HEIGHT && ball->velocity.y < 0.0f)
                 {
-                    didReset = true;
-                    ResetBall(ball,
-                              -1.0f,
-                              memory->PlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f);
-                    gameState->scores[1]++;
+                    ball->velocity.y = 1.0f;
+                    ball->speed *= 1.1f;
+                    newPos.y = GAME_HUD_HEIGHT + ball->radius;
+
+                    if (!ball->bounceCoro) // don't do bounce effect if one is already playing
+                    {
+                        ball->bounceCoro = GetFreeCoroutine(gameState);
+                    }
+                }
+                else if (newPos.y + ball->radius > GAME_HEIGHT && ball->velocity.y > 0.0f)
+                {
+                    ball->velocity.y = -1.0f;
+                    ball->speed *= 1.1f;
+                    newPos.y = GAME_HEIGHT - ball->radius;
+
+                    if (!ball->bounceCoro) // don't do bounce effect if one is already playing
+                    {
+                        ball->bounceCoro = GetFreeCoroutine(gameState);
+                    }
+                }
+
+                // Collide with paddles
+                bool32 didReset = false;
+                // Player 1
+                {
+                    PaddleState *const paddle = &gameState->paddle[0];
+
+                    const float halfPaddleWidth = paddle->width * 0.5f;
+
+                    const bool32 isBeyondPaddle =
+                        newPos.x - ball->radius <= paddle->position.x + halfPaddleWidth;
+
+                    const bool32 wasBeyondPaddle =
+                        ball->position.x - ball->radius < paddle->position.x + halfPaddleWidth;
+
+                    const bool32 isMovingTowardPaddle =
+                        ball->velocity.x < 0.0f;
+
+                    const float bounceVelocityX = 1.0f;
+                    const float bouncePositionX = ball->radius + paddle->position.x + halfPaddleWidth;
+
+                    const bool32 isOutOfBounds = newPos.x + ball->radius < 0.0f;
+
+                    const bool32 shouldReset = CollideBallWithPaddle(gameState,
+                                                                     ball,
+                                                                     paddle,
+                                                                     isBeyondPaddle,
+                                                                     wasBeyondPaddle,
+                                                                     isMovingTowardPaddle,
+                                                                     bounceVelocityX,
+                                                                     bouncePositionX,
+                                                                     isOutOfBounds,
+                                                                     &newPos);
+                    if (shouldReset)
+                    {
+                        PlaySquareWave(gameState, memory, soundBuffer,
+                                       140.0f, 0.8f, 3000.0f,
+                                       0.2f, 0.9999f);
+
+                        gameState->resetCoro = GetFreeCoroutine(gameState);
+                        if (gameState->resetCoro)
+                        {
+                            ResetCoroutine(gameState->resetCoro,
+                                           &gameState->time,
+                                           gameState,
+                                           memory,
+                                           0.8f,
+                                           1);
+                        }
+                        else
+                        {
+                            Assert(false); // shouldn't happen!
+                        }
+                        didReset = true;
+                    }
+                }
+                // Player 2
+                {
+                    PaddleState *const paddle = &gameState->paddle[1];
+
+                    const float halfPaddleWidth = paddle->width * 0.5f;
+
+                    const bool32 isBeyondPaddle =
+                        newPos.x + ball->radius >= paddle->position.x - halfPaddleWidth;
+
+                    const bool32 wasBeyondPaddle =
+                        ball->position.x + ball->radius > paddle->position.x - halfPaddleWidth;
+
+                    const bool32 isMovingTowardPaddle =
+                        ball->velocity.x > 0.0f;
+
+                    const float bounceVelocityX = -1.0f;
+                    const float bouncePositionX = paddle->position.x - halfPaddleWidth - ball->radius;
+
+                    const bool32 isOutOfBounds = newPos.x - ball->radius > GAME_WIDTH;
+
+                    const bool32 shouldReset  = CollideBallWithPaddle(gameState,
+                                                                      ball,
+                                                                      paddle,
+                                                                      isBeyondPaddle,
+                                                                      wasBeyondPaddle,
+                                                                      isMovingTowardPaddle,
+                                                                      bounceVelocityX,
+                                                                      bouncePositionX,
+                                                                      isOutOfBounds,
+                                                                      &newPos);
+                    if (shouldReset)
+                    {
+                        PlaySquareWave(gameState, memory, soundBuffer,
+                                       140.0f, 0.8f, 3000.0f,
+                                       0.2f, 0.9999f);
+
+                        gameState->resetCoro = GetFreeCoroutine(gameState);
+                        if (gameState->resetCoro)
+                        {
+                            ResetCoroutine(gameState->resetCoro,
+                                           &gameState->time,
+                                           gameState,
+                                           memory,
+                                           0.8f,
+                                           0);
+                        }
+                        else
+                        {
+                            Assert(false); // shouldn't happen!
+                        }
+                        didReset = true;
+                    }
+                }
+
+                if (!didReset)
+                {
+                    ball->position = newPos;
+                }
+
+                // Update ball bounce coroutine, if there is one going
+                if (ball->bounceCoro)
+                {
+                    BounceSizeCoroutine(ball->bounceCoro,
+                                        gameState,
+                                        memory,
+                                        soundBuffer,
+                                        &gameState->time,
+                                        0.1f,
+                                        2.0f,
+                                        &ball->radius);
+                    if (!ball->bounceCoro->jmp)
+                    {   // coro is over
+                        ball->bounceCoro = 0;
+                    }
                 }
             }
-            // Player 2
+            // Ball is resetting
+            else
             {
-                PaddleState *const paddle = &gameState->paddle[1];
-
-                const float halfBallSize = ball->size * 0.5f;
-                const float halfPaddleWidth = paddle->width * 0.5f;
-
-                const bool32 isBeyondPaddle =
-                    newPos.x + halfBallSize >= paddle->position.x - halfPaddleWidth;
-
-                const bool32 wasBeyondPaddle =
-                    ball->position.x + halfBallSize > paddle->position.x - halfPaddleWidth;
-
-                const bool32 isMovingTowardPaddle =
-                    ball->velocity.x > 0.0f;
-
-                const float bounceVelocityX = -1.0f;
-                const float bouncePositionX = paddle->position.x - halfPaddleWidth - halfBallSize;
-
-                const bool32 isOutOfBounds = newPos.x - halfBallSize > GAME_WIDTH;
-
-                const bool32 shouldReset  = CollideBallWithPaddle(ball,
-                                                                  paddle,
-                                                                  isBeyondPaddle,
-                                                                  wasBeyondPaddle,
-                                                                  isMovingTowardPaddle,
-                                                                  bounceVelocityX,
-                                                                  bouncePositionX,
-                                                                  isOutOfBounds,
-                                                                  &newPos);
-                if (shouldReset)
+                ResetCoroutine(gameState->resetCoro,
+                               &gameState->time,
+                               gameState,
+                               memory,
+                               0.8f,
+                               0);
+                if (!gameState->resetCoro->jmp)
                 {
-                    didReset = true;
-                    ResetBall(ball,
-                              1.0f,
-                              memory->PlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f);
-                    gameState->scores[0]++;
+                    // coro over
+                    gameState->resetCoro = 0;
                 }
             }
 
-            if (!didReset)
+            if (gameState->scores[0] == WIN_SCORE || gameState->scores[1] == WIN_SCORE)
             {
-                ball->position = newPos;
-            }
-
-            if (gameState->scores[0] > WIN_SCORE || gameState->scores[1] > WIN_SCORE)
-            {
-                // TODO proper game resetting
-                // TODO win state for correct player
-                ResetBall(&gameState->ball,
-                          memory->PlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f,
-                          memory->PlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f);
-
-                ResetPaddle(&gameState->paddle[0], 20.0f);
-                ResetPaddle(&gameState->paddle[1], GAME_WIDTH - 20.0f);
-
-                gameState->scores[0] = 0;
-                gameState->scores[1] = 0;
-
-                gameState->mode = Titles;
+                gameState->mode = WinScreen;
             }
 
             // Draw HUD
@@ -665,10 +1021,10 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             // Draw ball
             {
                 const Vector2 topLeft = ball->position;
-                DrawRect(topLeft.x - halfBallSize,
-                         topLeft.y - halfBallSize,
-                         topLeft.x + halfBallSize,
-                         topLeft.y + halfBallSize,
+                DrawRect(topLeft.x - ball->radius,
+                         topLeft.y - ball->radius,
+                         topLeft.x + ball->radius,
+                         topLeft.y + ball->radius,
                          1.0f, 1.0f, 1.0f,
                          buffer);
             }
@@ -676,6 +1032,76 @@ extern "C" GAME_UPDATE_AND_RENDER(GameUpdateAndRender)
             // Draw paddles
             DrawPaddle(&gameState->paddle[0], buffer);
             DrawPaddle(&gameState->paddle[1], buffer);
+        } break;
+        case WinScreen:
+        {
+            if (!gameState->winCoro)
+            {
+                gameState->winCoro = GetFreeCoroutine(gameState);
+            }
+
+            // not an else because we want to to happen on same frame as getting the coro ^^
+            if (gameState->winCoro)
+            {
+                WinCoroutine(gameState->winCoro,
+                             &gameState->time,
+                             5.0f,
+                             input);
+                if (!gameState->winCoro->jmp)
+                {   // coro is over
+                    gameState->winCoro = 0;
+                    ResetGameSession(memory, gameState);
+                    gameState->mode = Titles;
+                }
+            }
+
+            // Paddle input
+            UpdatePaddle(&gameState->paddle[0], &input->player[0], dt);
+            UpdatePaddle(&gameState->paddle[1], &input->player[1], dt);
+
+            if (gameState->scores[0] == WIN_SCORE)
+            {
+                Blit(0, 0, 1.0f, gameState->winnerBitmap, buffer);
+            }
+            else if (gameState->scores[1] == WIN_SCORE)
+            {
+                Blit(GAME_WIDTH / 2, 0, 1.0f, gameState->winnerBitmap, buffer);
+            }
+
+            // Draw HUD
+            {
+                DrawBigNumber(BN[gameState->scores[0] % 10],
+                              10, 10, 10,
+                              1.0f, 1.0f, 1.0f,
+                              buffer);
+                DrawBigNumber(BN[gameState->scores[1] % 10],
+                              GAME_WIDTH - 10 - 10 * BIG_NUMBER_WIDTH, 10, 10,
+                              1.0f, 1.0f, 1.0f,
+                              buffer);
+                DrawLineHorz(0.0f, GAME_WIDTH, GAME_HUD_HEIGHT,
+                             1.0f, 1.0f, 1.0f,
+                             buffer);
+                const float gray = 0.25f;
+                const float offset = 15.0f;
+                DrawLineVert(GAME_HUD_HEIGHT + offset, GAME_HEIGHT - offset, GAME_WIDTH * 0.5,
+                             gray, gray, gray,
+                             buffer);
+            }
+
+            // Draw paddles
+            DrawPaddle(&gameState->paddle[0], buffer);
+            DrawPaddle(&gameState->paddle[1], buffer);
+
+            const int flashSpeed = 15;
+            if (gameState->scores[0] == WIN_SCORE && (gameState->time.frameCount / flashSpeed) % 2 == 0)
+            {
+                InvertBuffer(0, 0, GAME_WIDTH / 2, GAME_HEIGHT, buffer);
+            }
+            else if (gameState->scores[1] == WIN_SCORE && (gameState->time.frameCount / flashSpeed) % 2 == 0)
+            {
+                InvertBuffer(GAME_WIDTH / 2, 0, GAME_WIDTH, GAME_HEIGHT, buffer);
+            }
+
         } break;
     }
 

@@ -10,6 +10,7 @@
 
 global_variable bool32 globalIsRunning;
 global_variable SDLTest_RandomContext *globalRandomContext;
+global_variable char *globalResourcePath;
 
 struct SDLGameCode
 {
@@ -41,66 +42,81 @@ struct SDLState
     GameMemory gameMemory;
 };
 
-PLATFORM_RANDOM_NUMBER(SDLRandomNumber)
+DEBUG_PLATFORM_RANDOM_NUMBER(SDLRandomNumber)
 {
     return SDLTest_RandomInt(globalRandomContext);
 }
 
-PLATFORM_LOAD_BMP(SDLLoadBMP)
+DEBUG_PLATFORM_FREE_FILE_MEMORY(DEBUGPlatformFreeFileMemory)
 {
-    SDL_Surface *image = SDL_LoadBMP(filename);
-    if (image)
+    if (memory)
     {
-        OffscreenBuffer dest =
+        free(memory);
+    }
+}
+
+void ConcatStrings(char *a, char *b, char *dest)
+{
+    // TOOD very very bad string concat routine!!
+    while (*a)
+    {
+        *dest++ = *a++;
+    }
+    while (*b)
+    {
+        *dest++ = *b++;
+    }
+
+    *dest++ = 0;
+}
+
+DEBUG_PLATFORM_READ_ENTIRE_FILE(DEBUGPlatFormReadEntireFile)
+{
+    DEBUGReadFileResult result = {};
+
+    char fullFilePath[1024];
+    ConcatStrings(globalResourcePath, filename, fullFilePath);
+    printf("%s\n", fullFilePath);
+
+    int fd = open(fullFilePath, O_RDONLY);
+    if (fd != -1)
+    {
+        struct stat fileStat;
+        if (fstat(fd, &fileStat) == 0)
         {
-            .bytesPerPixel = BYTES_PER_PIXEL,
-            .width = image->w,
-            .height = image->h,
-            .pitch = image->w * BYTES_PER_PIXEL,
-            .memory = bitmapMemory,
-        };
-
-        if (image->pixels)
-        {
-            uint8 *srcRow = (uint8 *)image->pixels;
-            uint8 *destRow = (uint8 *)dest.memory;
-
-            const int srcPixelStride = image->pitch / image->w;
-            /*Assert(srcPixelStride == 3);*/
-            Assert(srcPixelStride <= BYTES_PER_PIXEL);
-
-            for (int y = 0; y < image->h; ++y)
+            uint32 fileSize32 = fileStat.st_size;
+            result.contents = (char *)malloc(fileSize32);
+            if (result.contents)
             {
-                uint8 *srcPixel = (uint8 *)srcRow;
-                uint32 *destPixel = (uint32 *)destRow;
-                for (int x = 0; x < image->w; ++x)
+                ssize_t bytesRead;
+                bytesRead = read(fd, result.contents, fileSize32);
+                if (bytesRead == fileSize32) // should have read entire file
                 {
-                    /*int red = *srcPixel++;
-                    int green = *srcPixel++;
-                    int blue = *srcPixel++;
-
-                    uint32 pixel = ((red << 16) | (green << 8) | (blue));
-                    *destPixel++ = pixel;*/
-                    *destPixel++ = *(uint32 *)srcPixel;
-                    srcPixel += srcPixelStride;
+                    result.size = fileSize32;
                 }
-
-                srcRow += image->pitch;
-                destRow += dest.pitch;
+                else
+                {
+                    DEBUGPlatformFreeFileMemory(result.contents);
+                    result.contents = 0;
+                }
+            }
+            else
+            {
+                // TODO logging
             }
         }
+        else
+        {
+            // TODO logging
+        }
 
-        SDL_FreeSurface(image);
-
-        return dest;
+        close(fd);
     }
     else
     {
         // TODO logging
     }
-
-    OffscreenBuffer empty = {};
-    return empty;
+    return result;
 }
 
 internal time_t SDLGetLastWriteTime(const char *filename)
@@ -144,8 +160,10 @@ internal void SDLGetGameCodePath(SDLGameCode *gameCode)
         *s = *t;
     }
 
-    /*printf("exe path: %s\n", gameCode->exePath);
-    printf("dll path: %s\n", gameCode->dllPath);*/
+#if 0
+    printf("exe path: %s\n", gameCode->exePath);
+    printf("dll path: %s\n", gameCode->dllPath);
+#endif
 }
 
 internal void SDLLoadGameCode(const char *dllName, SDLGameCode *gameCode)
@@ -290,14 +308,112 @@ internal void HandleJoystickInput(GameInput *const input,
     }
 }
 
+struct SDLAudioRingBuffer
+{
+    int size;
+    int writeCursor;
+    int playCursor;
+    void *data;
+};
+
+global_variable SDLAudioRingBuffer globalAudioRingBuffer;
+
+internal void sdlAudioCallback(void *userData, uint8 *audioData, int length)
+{
+    SDLAudioRingBuffer *ringBuffer = (SDLAudioRingBuffer *)userData;
+
+    int region1Size = length;
+    int region2Size = 0;
+    if (ringBuffer->playCursor + length > ringBuffer->size)
+    {
+        region1Size = ringBuffer->size - ringBuffer->playCursor;
+        region2Size = length - region1Size;
+    }
+
+    memcpy(audioData, (uint8 *)(ringBuffer->data) + ringBuffer->playCursor, region1Size);
+    memcpy(&audioData[region1Size], ringBuffer->data, region2Size);
+    ringBuffer->playCursor = (ringBuffer->playCursor + length) % ringBuffer->size;
+    ringBuffer->writeCursor = (ringBuffer->playCursor + length) % ringBuffer->size;
+}
+
+internal void sdlInitAudio(int32 samplesPerSecond, int32 bufferSize)
+{
+    SDL_AudioSpec audioSettings =
+    {
+        .freq = samplesPerSecond,
+        .format = AUDIO_S16LSB,
+        .channels = 2,
+        .samples = 512,
+        .callback = &sdlAudioCallback,
+        .userdata = &globalAudioRingBuffer,
+    };
+
+    globalAudioRingBuffer.size = bufferSize;
+    globalAudioRingBuffer.data = malloc(bufferSize);
+    globalAudioRingBuffer.playCursor = globalAudioRingBuffer.writeCursor = 0;
+
+    SDL_OpenAudio(&audioSettings, 0);
+
+    if (audioSettings.format != AUDIO_S16LSB)
+    {
+        SDL_CloseAudio();
+        // TODO logging
+    }
+}
+
+struct SDLSoundOutput
+{
+    int samplesPerSecond;
+    uint32 runningSampleIndex;
+    int bytesPerSample;
+    int audioBufferSize;
+    int latencySampleCount;
+};
+
+internal void sdlFillSoundBuffer(SDLSoundOutput *soundOutput,
+                                 int byteToLock,
+                                 int bytesToWrite,
+                                 GameSoundOutputBuffer *soundBuffer)
+{
+    int16 *samples = soundBuffer->samples;
+
+    void *region1 = (uint8 *)globalAudioRingBuffer.data + byteToLock;
+    int region1Size = bytesToWrite;
+    if (region1Size + byteToLock > soundOutput->audioBufferSize)
+    {
+        region1Size = soundOutput->audioBufferSize - byteToLock;
+    }
+    void *region2 = globalAudioRingBuffer.data;
+    int region2Size = bytesToWrite - region1Size;
+
+    int region1SampleCount = region1Size / soundOutput->bytesPerSample;
+    int16 *sampleOut = (int16 *)region1;
+    for (int i = 0; i < region1SampleCount; ++i)
+    {
+        *sampleOut++ = *samples++;
+        *sampleOut++ = *samples++;
+        ++soundOutput->runningSampleIndex;
+    }
+
+    int region2SampleCount = region2Size / soundOutput->bytesPerSample;
+    sampleOut = (int16 *)region2;
+    for (int i = 0; i < region2SampleCount; ++i)
+    {
+        *sampleOut++ = *samples++;
+        *sampleOut++ = *samples++;
+        ++soundOutput->runningSampleIndex;
+    }
+}
+
 int main(int argc, char **argv)
 {
+    globalResourcePath = SDL_GetBasePath();
+
     SDLTest_RandomContext rc;
     globalRandomContext = &rc;
     SDLTest_RandomInitTime(globalRandomContext);
 
-    // TODO _INIT_EVERYTHING is much slower than _INIT_VIDEO
-    SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK);
+    SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK | SDL_INIT_AUDIO);
 
     // TODO handle >2 joysticks, and arbitrary mapping to player inputs
     GameInput input = {};
@@ -318,42 +434,48 @@ int main(int argc, char **argv)
 
 
     SDL_Window *const window = SDL_CreateWindow("Pong",
+#define FULLSCREEN
+#if !defined(FULLSCREEN)
                                                 100, 100,
-                                                //SDL_WINDOWPOS_UNDEFINED,
-                                                //SDL_WINDOWPOS_UNDEFINED,
                                                 GAME_WIDTH,
                                                 GAME_HEIGHT,
-                                                //SDL_WINDOW_FULLSCREEN);
                                                 0);
+#else
+                                                SDL_WINDOWPOS_UNDEFINED,
+                                                SDL_WINDOWPOS_UNDEFINED,
+                                                GAME_WIDTH,
+                                                GAME_HEIGHT,
+                                                SDL_WINDOW_FULLSCREEN);
+
+    SDL_SetRelativeMouseMode(SDL_TRUE);
+#endif
+
     if (window)
     {
+        // AUDIO //
+        SDLSoundOutput soundOutput = {};
+        soundOutput.samplesPerSecond = SAMPLE_HZ;
+        soundOutput.runningSampleIndex = 0;
+        soundOutput.bytesPerSample = sizeof(int16) * 2;
+        soundOutput.audioBufferSize = soundOutput.samplesPerSecond * soundOutput.bytesPerSample;
+        soundOutput.latencySampleCount = soundOutput.samplesPerSecond / SOUND_LATENCY;
+
+        int16 *soundSamples = (int16 *)calloc(soundOutput.samplesPerSecond, soundOutput.bytesPerSample);
+
+        sdlInitAudio(soundOutput.samplesPerSecond, soundOutput.audioBufferSize);
+        SDL_PauseAudio(0);
+        // ----- //
+
         SDL_Renderer *const renderer = SDL_CreateRenderer(window,
                                                           -1,
                                                           SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
         if (renderer)
         {
-            globalIsRunning = true;
-
             SDL_Texture *const texture = SDL_CreateTexture(renderer,
                                                            SDL_PIXELFORMAT_ARGB8888,
                                                            SDL_TEXTUREACCESS_STREAMING,
                                                            GAME_WIDTH,
                                                            GAME_HEIGHT);
-
-            // FIXME without this fake bmp load and texture assign,
-            // subsequent loading of images fails when trying to access
-            // bitmap pixels
-            {
-                SDL_Surface *image;
-                SDL_Texture *imageTexture;
-                image = SDL_LoadBMP("../data/drul.bmp");
-                if (image)
-                {
-                    imageTexture = SDL_CreateTextureFromSurface(renderer, image);
-                    SDL_FreeSurface(image);
-                }
-            }
-
             OffscreenBuffer buffer =
             {
                 .bytesPerPixel = BYTES_PER_PIXEL,
@@ -375,8 +497,9 @@ int main(int argc, char **argv)
                     .isInitialized = false,
                     .permanentStorageSize = permanentStorageSize,
                     .permanentStorage = malloc(permanentStorageSize),
-                    .PlatformRandomNumber = SDLRandomNumber,
-                    .PlatformLoadBMP = SDLLoadBMP,
+                    .DEBUGPlatformRandomNumber = SDLRandomNumber,
+                    .DEBUGPlatformFreeFileMemory = DEBUGPlatformFreeFileMemory,
+                    .DEBUGPlatFormReadEntireFile = DEBUGPlatFormReadEntireFile,
                 },
             };
 
@@ -386,6 +509,7 @@ int main(int argc, char **argv)
 
                 SDLLoadGameCode(state.gameCode.dllPath, &state.gameCode);
 
+                globalIsRunning = true;
                 while(globalIsRunning)
                 {
                     const time_t newDLLWriteTime = SDLGetLastWriteTime(state.gameCode.dllPath);
@@ -526,14 +650,45 @@ int main(int argc, char **argv)
                         SDLPlaybackInput(&state, &input);
                     }
 
+                    // AUDIO //
+                    SDL_LockAudio();
+                    int byteToLock =
+                        (soundOutput.runningSampleIndex * soundOutput.bytesPerSample) % soundOutput.audioBufferSize;
+                    int targetCursor = ((globalAudioRingBuffer.playCursor +
+                                         (soundOutput.latencySampleCount * soundOutput.bytesPerSample)) %
+                                        soundOutput.audioBufferSize);
+                    int bytesToWrite;
+                    if (byteToLock > targetCursor)
+                    {
+                        bytesToWrite = (soundOutput.audioBufferSize - byteToLock);
+                    }
+                    else
+                    {
+                        bytesToWrite = targetCursor - byteToLock;
+                    }
+                    SDL_UnlockAudio();
+
+                    GameSoundOutputBuffer soundBuffer =
+                    {
+                        .samplesPerSecond = soundOutput.samplesPerSecond,
+                        .sampleCount = bytesToWrite / soundOutput.bytesPerSample,
+                        .runningSampleIndex = soundOutput.runningSampleIndex,
+                        .samples = soundSamples,
+                    };
+                    // ----- //
+
+
                     if (state.gameCode.UpdateAndRender)
                     {
                         // TODO proper frame timings
-                        state.gameCode.UpdateAndRender(&state.gameMemory, &input, 1.0f / 60.0f, &buffer);
+                        state.gameCode.UpdateAndRender(&state.gameMemory, &input, 1.0f / 60.0f, &buffer, &soundBuffer);
                     }
+
+                    // AUDIO //
+                    sdlFillSoundBuffer(&soundOutput, byteToLock, bytesToWrite, &soundBuffer);
+                    // ----- //
+
                     SDLUpdateWindow(&buffer, renderer, texture);
-                    /*SDL_RenderCopy(renderer, imageTexture, 0, 0);
-                    SDL_RenderPresent(renderer);*/
 
                     // TODO proper defined number of players
                     // TODO check that this doesn't break input recording/playback
@@ -543,6 +698,8 @@ int main(int argc, char **argv)
                         input.player[i].isUsingKeyboard = false;
                     }
                     input.anyButton.isDown = false;
+
+
                 }
             }
 
@@ -565,6 +722,7 @@ int main(int argc, char **argv)
         }
     }
 
+    SDL_CloseAudio();
     SDL_Quit();
     return 0;
 }
