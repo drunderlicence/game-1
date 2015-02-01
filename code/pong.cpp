@@ -600,6 +600,8 @@ internal void ResetCoroutine(CoroutineContext *context,
     CORO_STACK(float t0;
                int scorer;);
 
+    float dir;
+
     CORO_BEGIN;
 
     stack->t0 = time->seconds;
@@ -612,8 +614,11 @@ internal void ResetCoroutine(CoroutineContext *context,
         YIELD( );
     }
 
+    // select direction from who scored
+    dir = stack->scorer == 0 ? 1.0f : -1.0f;
+
     ResetBall(&state->ball,
-              1.0f,
+              dir,
               memory->DEBUGPlatformRandomNumber() % 2 == 0 ? -1.0f : 1.0f);
     state->scores[stack->scorer]++;
 
